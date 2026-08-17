@@ -1,10 +1,11 @@
 """
-OpenRouter helpers — just enough for Phase 2's Settings page.
+OpenRouter helpers.
 
-Two jobs:
+Three jobs:
   1. list_models()  -> the live catalogue, so the model pickers show what your
                        key can actually call (rather than a list that goes stale)
   2. check_key()    -> a real "is this key working?" test
+  3. chat()         -> the actual completion call the agents write with
 
 Fails soft: no key, no network, or an unhappy API returns empty results and the
 UI falls back to the offline defaults below instead of crashing.
@@ -83,3 +84,52 @@ def check_key() -> dict:
         return {"ok": True, "detail": f"Connected — {label}{extra}."}
     except Exception as e:
         return {"ok": False, "detail": f"Could not reach OpenRouter: {e}"}
+
+
+def chat(messages: list, model: str = "", temperature: float = 0.7,
+         max_tokens: int = 3000, timeout: int = 180) -> dict:
+    """
+    One chat completion. Returns {'ok': bool, 'text': str, 'detail': str} —
+    never raises, so an agent can surface the reason in the UI instead of
+    taking the dashboard down.
+
+    `model` is an OpenRouter id; pass the per-agent one from settings, e.g.
+    `config.get("BACKLINK_MODEL")`.
+    """
+    if not config.is_set("OPENROUTER_API_KEY"):
+        return {"ok": False, "text": "",
+                "detail": "No OpenRouter API key saved. Add one in Settings → AI models."}
+    if not model:
+        return {"ok": False, "text": "",
+                "detail": "No model selected for this agent. Pick one in Settings → AI models."}
+
+    try:
+        r = requests.post(
+            f"{API_BASE}/chat/completions",
+            headers={**_headers(), "Content-Type": "application/json"},
+            json={"model": model, "messages": messages,
+                  "temperature": temperature, "max_tokens": max_tokens},
+            timeout=timeout,
+        )
+        if r.status_code in (401, 403):
+            return {"ok": False, "text": "",
+                    "detail": "OpenRouter rejected the key (401/403). Check it in Settings."}
+        if r.status_code == 402:
+            return {"ok": False, "text": "",
+                    "detail": "OpenRouter says the account is out of credit (402)."}
+        if r.status_code == 404:
+            return {"ok": False, "text": "",
+                    "detail": f"OpenRouter doesn't serve `{model}`. Pick another model "
+                              "in Settings → AI models."}
+        r.raise_for_status()
+        data = r.json()
+        if "error" in data:
+            return {"ok": False, "text": "",
+                    "detail": f"OpenRouter error: {data['error'].get('message', data['error'])}"}
+        choices = data.get("choices") or []
+        text = (choices[0].get("message", {}).get("content", "") if choices else "").strip()
+        if not text:
+            return {"ok": False, "text": "", "detail": f"`{model}` returned an empty reply."}
+        return {"ok": True, "text": text, "detail": f"Written by {model}."}
+    except Exception as e:
+        return {"ok": False, "text": "", "detail": f"Could not reach OpenRouter: {e}"}
