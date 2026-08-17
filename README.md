@@ -15,19 +15,46 @@ reading `CLAUDE.md`, then `PROGRESS.md` (current state), then `PHASES.md` (roadm
 ```bash
 python -m venv .venv && source .venv/Scripts/activate   # Windows/MINGW64
 pip install -r requirements.txt
-cp .env.example .env        # fill in what you have; blanks degrade gracefully
+cp .env.example .env        # optional — you can fill everything in from the UI
 streamlit run app.py
 ```
-Opens on the Fix Plan, populated from seed data now; connect Search Console + GA4 to go live.
+Opens on the Overview, populated from seed data now. Blanks degrade gracefully: with no
+credentials you still get the full Fix Plan from your 16 Aug Search Console snapshot.
+
+## Setting it up
+Everything is configured from **Settings** in the sidebar — sites, per-agent models, and
+every API key — and saved to your local `.env` (git-ignored, chmod 600). Nothing needs
+hand-editing.
+
+1. **Settings → Google Search Console + Analytics** — point it at your service-account
+   JSON, then grant that email access in Search Console (Settings → Users) and GA4
+   (Admin → Property access management).
+2. **Settings → Test connections** — checks the sitemap, Search Console access, Search
+   Analytics, URL Inspection and GA4 separately, and names the step that failed.
+3. **Refresh live data** in the sidebar — replaces the seed snapshot with live coverage.
+
+## Pages
+| Page | What it's for |
+|---|---|
+| **Overview** | Indexing health, what to do next, what's connected |
+| **Analysis** | Fix Plan, Indexing, Performance (GSC), Audience (GA4) |
+| **Content** | The SEO/AEO/GEO writing path → WordPress drafts |
+| **Backlinks** | Lane A auto-publish (owned platforms) · Lane B guest outreach |
+| **Settings** | Sites, models, API keys, connection tests |
 
 ## Layout
 ```
-app.py              Streamlit entry (conductor)
-core/               config, gsc, ga4, classifier, seed  (Analysis foundation)
+app.py              Streamlit entry — sidebar + page dispatch
+core/               config, settings schema, gsc, ga4, openrouter, classifier, seed
 agents/             analysis / backlink / content        (built in phases)
-ui/                 clean UI helpers + pages             (Phase 2)
+ui/                 components + data loader + one module per page in views/
 .claude/skills/     the SEO/AEO/GEO content agent (quality path)
 CLAUDE.md           how Claude Code should work here
 PHASES.md           the roadmap
 PROGRESS.md         living status — paste into a fresh chat to resume
 ```
+
+## Ground rules the code enforces
+- WordPress publishing is **always a draft**.
+- Auto-publishing only ever targets platforms you own; guest posts wait for your click.
+- No fabricated statistics or keyword volumes — no data means it says so.

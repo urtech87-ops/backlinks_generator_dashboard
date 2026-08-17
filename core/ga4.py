@@ -22,7 +22,7 @@ def _client():
     if not (_LIBS_OK and config.credentials_available()):
         return None
     creds = Credentials.from_service_account_file(
-        config.SERVICE_ACCOUNT_FILE, scopes=config.GA4_SCOPES
+        config.service_account_file(), scopes=config.GA4_SCOPES
     )
     return BetaAnalyticsDataClient(credentials=creds)
 
@@ -84,3 +84,35 @@ def channels(property_id: str, start: str, end: str, limit=20):
 def countries(property_id: str, start: str, end: str, limit=15):
     return _run(property_id, ["country"],
                 ["activeUsers", "sessions"], start, end, limit)
+
+
+def check_connection(property_id: str, days: int = 28) -> list[dict]:
+    """
+    Verify GA4 for one site. Same {'name', 'ok', 'detail'} shape as
+    gsc.check_connection, and equally fail-soft.
+    """
+    import datetime as _dt
+
+    if not property_id:
+        return [{"name": "GA4", "ok": False,
+                 "detail": "No GA4 property ID set for this site (that's fine — "
+                           "the Audience view just stays empty)."}]
+    if not _LIBS_OK:
+        return [{"name": "GA4", "ok": False,
+                 "detail": "The google-analytics-data library isn't installed. "
+                           "Run: pip install -r requirements.txt"}]
+    if not config.credentials_available():
+        return [{"name": "GA4", "ok": False,
+                 "detail": "No service-account JSON found — see the Google section above."}]
+
+    end = _dt.date.today()
+    start = end - _dt.timedelta(days=days)
+    s = summary(property_id, start.isoformat(), end.isoformat())
+    if s:
+        return [{"name": "GA4 Data API", "ok": True,
+                 "detail": f"Property {property_id}: {s['activeUsers']} active users / "
+                           f"{s['sessions']} sessions in the last {days} days."}]
+    return [{"name": "GA4 Data API", "ok": False,
+             "detail": f"No data back from property {property_id}. Check the ID is the "
+                       "numeric property ID, and that the service-account email has "
+                       "Viewer access in GA4 → Admin → Property access management."}]
