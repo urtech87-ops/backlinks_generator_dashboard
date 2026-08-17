@@ -1,0 +1,7 @@
+streamlit>=1.36
+pandas>=2.0
+python-dotenv>=1.0
+requests>=2.31
+google-auth>=2.30
+google-api-python-client>=2.130
+google-analytics-data>=0.18
