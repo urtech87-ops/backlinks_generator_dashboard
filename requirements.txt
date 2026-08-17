@@ -5,3 +5,6 @@ requests>=2.31
 google-auth>=2.30
 google-api-python-client>=2.130
 google-analytics-data>=0.18
+# Markdown -> HTML for the Blogger and WordPress publishers. Optional: without
+# it they fall back to a crude paragraph split rather than failing.
+markdown>=3.5

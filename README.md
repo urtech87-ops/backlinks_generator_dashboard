@@ -33,6 +33,20 @@ hand-editing.
    Analytics, URL Inspection and GA4 separately, and names the step that failed.
 3. **Refresh live data** in the sidebar — replaces the seed snapshot with live coverage.
 
+## Building a backlink (Lane A)
+**Settings → Backlink platforms** — add a dev.to API key, your four Blogger values, or a
+WordPress application password. Then on **Backlinks → Auto-publish**:
+
+1. **Pick the page you want links to.** Ranked by where a link does most good: pages
+   within striking distance on real impressions, and pages Google has discovered but
+   never crawled. Broken and quality-rejected pages aren't offered — a link there is
+   wasted.
+2. **Pick the platforms.** One article is written per platform, tailored to its audience.
+3. **Generate**, then read it. The editor flags the target link: none is an error, more
+   than one reads as link-building.
+4. **Publish.** Tick *save as an unpublished draft* for a first run. Every attempt, live
+   or failed, lands in `data/backlinks.csv`.
+
 ## Pages
 | Page | What it's for |
 |---|---|
@@ -45,8 +59,9 @@ hand-editing.
 ## Layout
 ```
 app.py              Streamlit entry — sidebar + page dispatch
-core/               config, settings schema, gsc, ga4, openrouter, classifier, seed
-agents/             analysis / backlink / content        (built in phases)
+core/               config, settings schema, gsc, ga4, openrouter, classifier, seed, tracker
+agents/             backlink.py (Lane A) · analysis / content still to come
+publishers/         one module per platform you own: dev.to, Blogger, your WordPress
 ui/                 components + data loader + one module per page in views/
 .claude/skills/     the SEO/AEO/GEO content agent (quality path)
 CLAUDE.md           how Claude Code should work here

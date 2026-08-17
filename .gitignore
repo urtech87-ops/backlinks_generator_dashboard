@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 data/*.log
 data/*.json
+# Your backlink tracker is your data, not the app's.
+data/*.csv
 .streamlit/secrets.toml
 # Claude Code local skill symlinks (if any)
 .agents/skills/

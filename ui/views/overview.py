@@ -8,8 +8,10 @@ conductor that launches the content and backlink runs from here.
 
 import streamlit as st
 
+import publishers
 from core import config
 from core.classifier import PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY
+from publishers import PLATFORMS
 from ui import components as c
 from ui import data as d
 
@@ -156,8 +158,8 @@ def _system_status(ctx) -> list:
                      "detail": f"Add a WordPress username + application password for "
                                f"{ctx.site.label} in Settings to publish drafts."})
 
-    owned = [n for n, k in (("dev.to", "DEVTO_API_KEY"), ("Blogger", "BLOGGER_BLOG_ID"))
-             if config.is_set(k)]
+    # One source of truth: the publisher registry, which is owned platforms only.
+    owned = [PLATFORMS[k].label for k in publishers.ready_keys(ctx.site)]
     rows.append({
         "name": "Owned platforms",
         "state": "ok" if owned else "idle",
