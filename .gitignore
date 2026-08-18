@@ -9,3 +9,5 @@ data/*.csv
 .streamlit/secrets.toml
 # Claude Code local skill symlinks (if any)
 .agents/skills/
+# Articles this dashboard writes are your content, not the app.
+outputs/
