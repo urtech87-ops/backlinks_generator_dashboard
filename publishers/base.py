@@ -21,13 +21,24 @@ except ImportError:                     # optional — see the fallback below
 
 @dataclass
 class Article:
-    """One platform-ready post, on its way to a platform you own."""
+    """
+    One platform-ready post, on its way to a platform you own.
+
+    The first block is what the Backlink agent fills in. The second block is
+    what the Content agent adds for a full article (Phase 5) — every one of them
+    is optional and defaulted, so the platforms that have no concept of a slug or
+    a featured image simply ignore them.
+    """
     title: str
     body_markdown: str
     tags: list = field(default_factory=list)
     summary: str = ""
     target_url: str = ""                # the page on your site this links to
     canonical_url: str = ""             # normally blank: the post is original here
+
+    slug: str = ""                      # short, clean permalink
+    categories: list = field(default_factory=list)
+    images: list = field(default_factory=list)   # [{path, alt, featured}]
 
 
 @dataclass

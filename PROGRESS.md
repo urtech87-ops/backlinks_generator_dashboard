@@ -5,9 +5,10 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-18 · **Current phase:** Phase 4 done → Phase 5 (content agent)
-**Overall:** ▓▓▓▓▓░░ ~60% (foundation, UI shell and BOTH backlink lanes are done — the
-user's main target is built end to end; the content agent's in-dashboard path is next)
+**Last updated:** 2026-08-18 · **Current phase:** Phase 5 done → Phase 6 (opportunity + keywords)
+**Overall:** ▓▓▓▓▓▓░ ~72% (foundation, UI shell, BOTH backlink lanes and the in-dashboard
+content agent are done — every agent now has a working path in the dashboard; what's left
+is deciding *what* to write about, and tying the three together)
 
 ---
 
@@ -15,8 +16,9 @@ user's main target is built end to end; the content agent's in-dashboard path is
 
 Streamlit dashboard = conductor for two sites (toolsvenue.com, toolacademy.com). Three
 agents: **Analysis** (OpenRouter, cheap) reads Search Console + GA4, triages not-indexed
-pages into Plumbing / Content / Crawl-budget and ranks winners; **Content + SEO** (Claude,
-strongest — lives in `.claude/skills/`) writes SEO/AEO/GEO articles → WordPress drafts;
+pages into Plumbing / Content / Crawl-budget and ranks winners; **Content + SEO** (strongest model)
+writes SEO/AEO/GEO articles → WordPress drafts, on two paths: the volume path in the
+Content page, and the deeper quality path in `.claude/skills/`;
 **Backlink** (OpenRouter, cheap — the MAIN TARGET) runs two lanes: auto-publish to owned
 platforms, and human-gated guest outreach. Growth really comes from fixing indexing +
 quality content; backlinks are the visible target, not the engine.
@@ -63,6 +65,18 @@ quality content; backlinks are the visible target, not the engine.
 - **No invented performance numbers.** With Search Console connected, targets rank on
   real impressions + average position. Without it, the page says so and shows the
   eligible list *unranked* rather than inventing a score.
+- **A cited source has to be a source the run actually found.** The content agent hands
+  the model a numbered research list and permits figures only from those snippets; then
+  `check()` compares every URL in `meta.sources` back against that list and marks any
+  stranger red. It's the one check that can catch a hallucinated citation, which is the
+  failure mode that would do real damage here.
+- **The volume path and the quality path share one standard.** The writer skill's rules
+  (answer-first opening, question-shaped headings, FAQ, short slug, meta lengths,
+  internal links) are the checks the dashboard runs, so the fast path can't quietly drift
+  into thin content — the thing that got these pages de-indexed in the first place.
+- **The image adapter is loaded, not copied.** `core/images.py` imports the skill's
+  `assets/image_adapter.py` by path, so when the user wires a real provider there, the
+  dashboard picks it up with no second edit.
 
 ## Phase checklist
 
@@ -103,8 +117,20 @@ quality content; backlinks are the visible target, not the engine.
       key" message instead of crashing), the tracker's migration + stage folding, and the
       whole Lane B UI driven end to end with Streamlit's AppTest against stubbed
       prospects. First real run: **Settings → Prospecting → Test search**.
-- [ ] **Phase 5 — Content + SEO agent (volume path)** ← next
-- [ ] **Phase 6 — Opportunity Finder + optional Keyword engine**
+- [x] **Phase 5 — Content + SEO agent (volume path)** — topic → web research → an
+      SEO/AEO/GEO article written by `CONTENT_MODEL` → images (or briefs) → a WordPress
+      **draft**, all inside the Content page. The writer skill's rules are enforced in
+      code (`agents/content.check()`), not just asked for in the prompt, and every cited
+      source URL is traced back to research this run actually found — an invented URL is
+      flagged red and blocks the draft until you tick past it.
+      *Note:* this environment's proxy blocks general outbound HTTPS, so neither the real
+      search nor a real OpenRouter call could be run from here. What *was* verified, with
+      stubs: the full page driven end to end by Streamlit's AppTest (topic → draft →
+      edits carried into the post → images → WordPress draft → saved run), the
+      fabricated-source and unsourced-figure checks, the hard-check gate disabling the
+      publish button, `status: draft` in the posted payload, image *briefs* never being
+      uploaded as media, and Lane A's payload being unchanged by the new Article fields.
+- [ ] **Phase 6 — Opportunity Finder + optional Keyword engine** ← next
 - [ ] **Phase 7 — Orchestration & polish**
 
 ## Done so far
@@ -118,9 +144,8 @@ quality content; backlinks are the visible target, not the engine.
 - `app.py` is now a thin shell: sidebar (page, site, dates, refresh) → page module.
 - Overview page: indexing health, an ordered "what to do next" list generated from the
   bucket counts, and a system-status strip showing what's connected.
-- The Content page is still an honest placeholder — it states what Phase 5 will build and
-  shows live readiness (WordPress creds, models, image provider) instead of dead buttons.
-  Both Backlinks lanes are now real (below).
+- The Content page is now the real volume path (below), sitting alongside the quality
+  path it links out to. Both Backlinks lanes are real too.
 - Six content skills in `.claude/skills/` (orchestrator, brand + competitor scrapers,
   keyword researcher, SEO/AEO/GEO writer, image generator, WordPress publisher) with
   pluggable image + keyword adapters (dummy defaults).
@@ -161,25 +186,53 @@ quality content; backlinks are the visible target, not the engine.
   a ranked target picker, a per-platform draft editor with a link-count check
   (0 links → error, 2+ → "this reads as link-building"), a "save as draft everywhere"
   option for a first run, and the tracker.
+- **`agents/content.py`** (Phase 5) — the volume path. `research()` searches through the
+  same `core/search.py` adapter Lane B prospects with (own domain excluded — your pages
+  are internal links, not sources); `write()` makes ONE `CONTENT_MODEL` call that returns
+  the article *and* its meta.json (title, meta title/description, slug, keyword, tags,
+  categories, FAQ, schema, sources, internal links, image prompts); `check()` applies the
+  writer skill's rules to what came back; `make_images()`, `save_run()` and
+  `publish_draft()` finish the run. It reuses `backlink._parse_json` and
+  `backlink.page_facts` rather than re-solving them.
+- **No-research is a stated state, not a silent one.** If search fails, the prompt forbids
+  every statistic and the page says the piece is qualitative and any figure is unvalidated.
+- **`core/images.py`** — loads the *skill's* `image_adapter.py` by path and calls its
+  `generate_image()`, refreshing its provider/key/model from Settings before each call
+  (it reads them at import time, which would otherwise go stale in a long-running app).
+  No image API → briefs, and drafting carries on.
+- **`publishers/wordpress.py`** gained the rest of the publisher skill: media upload with
+  alt text, featured image, slug and categories. `Article` gained `slug`, `categories` and
+  `images`, all optional, so Lane A posts are byte-identical to before. Status is still
+  hard-coded to `draft`.
+- **Runs are saved to `outputs/<slug>/`** in the orchestrator skill's layout
+  (`content/article.md`, `content/meta.json`, `research/research-brief.md`, `images/`,
+  `run.json`), so a run is auditable, reusable, and readable by the standalone
+  `publish.py`. The folder is git-ignored — it's your content, not the app's.
+- Content page is live: readiness strip (WordPress · model · research · images), topic +
+  optional keyword + direction, an internal-link picker fed only by *indexed* pages, the
+  research summary with its sources, a quality-check panel, editable article/meta/FAQ,
+  images (or briefs), "create the WordPress draft" / "save to outputs only", and a list of
+  recent runs. A draft failing a hard check can't be filed until you tick past it.
 
 ## Next up (start here)
-**Phase 5 — Content + SEO agent (volume path).** Read `PHASES.md` → Phase 5, then
-`.claude/skills/blog-writer-seo-aeo-geo/SKILL.md` (the quality path this fast path has to
-stay consistent with) and `.claude/skills/wordpress-publisher/assets/publish.py`. Reuse
-`core/openrouter.chat()` and `agents/backlink._parse_json` for the JSON-mode drafting,
-and `publishers/wordpress.py` for the draft (status is hard-coded to `draft` there —
-leave it that way). The Content page is still the honest placeholder in
-`ui/views/content.py`.
+**Phase 6 — Opportunity Finder + optional Keyword engine.** Read `PHASES.md` → Phase 6,
+then `.claude/skills/competitor-site-scraper/SKILL.md` and
+`.claude/skills/keyword-researcher/SKILL.md`. Reuse `core/search.py` for the competitor
+scan (it already handles four providers and fails soft), `core/gsc.py` for
+striking-distance queries, and hand the result straight into the Content page's topic +
+primary-keyword boxes (`content_topic` / `content_keyword`) and Lane A's target picker.
+The keyword branch must stay optional — GSC-first works with no paid key.
 
-**Worth doing before Phase 5, now that both link lanes exist:**
-- Run Lane A once for real: add a dev.to API key, tick "save as an unpublished draft",
-  publish. That's the only way to confirm the drafting prompt and the dev.to publisher
-  against a live account.
-- Run **Settings → Prospecting → Test search**, then find prospects once for a real
-  target page. If DuckDuckGo throttles you, add a Serper key — the provider is a
-  dropdown, nothing else changes.
-- Send one pitch by hand (copy path) before wiring SMTP. The board doesn't care which
-  way it went out, and it tells you whether the pitch reads like a person wrote it.
+**Worth doing before Phase 6:**
+- Write one real article: add an OpenRouter key + a Content model, type a topic, and
+  press **Research and write the draft**. That's the only way to see the drafting prompt
+  and the quality checks against a live model. If DuckDuckGo throttles the research step,
+  add a Serper key in **Settings → Prospecting** — the same provider serves both.
+- File that draft to WordPress once, so the per-site application password is confirmed
+  end to end (media upload included).
+- Run Lane A once for real (dev.to key + "save as an unpublished draft").
+- Run **Settings → Prospecting → Test search**, then prospect once for a real target page.
+- Send one guest pitch by hand (copy path) before wiring SMTP.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Run **Settings → Test connections** with the real service-account file, so live GSC
