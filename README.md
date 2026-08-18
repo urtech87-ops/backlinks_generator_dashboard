@@ -73,6 +73,7 @@ don't own. On **Backlinks → Guest outreach**:
 |---|---|
 | **Overview** | Indexing health, what to do next, what's connected |
 | **Analysis** | Fix Plan, Indexing, Performance (GSC), Audience (GA4) |
+| **Opportunities** | Content gaps from competitors + the optional keyword engine |
 | **Content** | The SEO/AEO/GEO writing path → WordPress drafts |
 | **Backlinks** | Lane A auto-publish (owned platforms) · Lane B guest outreach |
 | **Settings** | Sites, models, API keys, connection tests |
@@ -82,8 +83,10 @@ don't own. On **Backlinks → Guest outreach**:
 app.py              Streamlit entry — sidebar + page dispatch
 core/               config, settings schema, gsc, ga4, openrouter, classifier, seed,
                     tracker, search (prospecting), mailer (optional pitch send)
-agents/             backlink.py (Lane A) · outreach.py (Lane B) · analysis / content
-                    still to come
+core/keywords.py    the optional keyword engine — Search Console first, free
+                    autocomplete second, a paid API only if you plug one in
+agents/             backlink.py (Lane A) · outreach.py (Lane B) · content.py (writer)
+                    opportunity.py (competitor + coverage gaps) · analysis still to come
 publishers/         one module per platform you own: dev.to, Blogger, your WordPress
 ui/                 components + data loader + one module per page in views/
 .claude/skills/     the SEO/AEO/GEO content agent (quality path)

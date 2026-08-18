@@ -19,7 +19,8 @@ class Ctx:
     creds: bool         # Google service-account JSON present?
 
 
-from . import overview, analysis, content, backlinks, settings  # noqa: E402
+from . import (overview, analysis, opportunities, content, backlinks,  # noqa: E402
+               settings)
 
 # Sidebar order mirrors the system tree: data → decide → do → configure.
 PAGES = {
@@ -27,6 +28,8 @@ PAGES = {
                  "Where both sites stand and what to do next"),
     "Analysis": ("🔍", analysis.render,
                  "Fix Plan, indexing, performance and audience"),
+    "Opportunities": ("💡", opportunities.render,
+                      "Content gaps from competitors, plus your real keywords"),
     "Content": ("✍️", content.render,
                 "Research and write articles into WordPress drafts"),
     "Backlinks": ("🔗", backlinks.render,

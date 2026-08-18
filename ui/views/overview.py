@@ -51,6 +51,13 @@ def render(ctx) -> None:
     actions = _next_actions(counts, summary)
     if not actions:
         st.success("Nothing urgent in the indexing data. Time to publish and build links.")
+    # Always last: once the fixes are in hand, the question is what to publish.
+    actions.append((
+        "💡", "Decide what to write next",
+        "The Opportunity Finder compares your coverage with your competitors' and with "
+        "the queries you already rank for, then hands the topic straight to the writer.",
+        "Opportunities", "Opportunities",
+    ))
     for i, (icon, title, detail, page, cta) in enumerate(actions, 1):
         with st.container(border=True):
             left, right = st.columns([5, 1])

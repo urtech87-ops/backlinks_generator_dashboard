@@ -5,10 +5,11 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-18 · **Current phase:** Phase 5 done → Phase 6 (opportunity + keywords)
-**Overall:** ▓▓▓▓▓▓░ ~72% (foundation, UI shell, BOTH backlink lanes and the in-dashboard
-content agent are done — every agent now has a working path in the dashboard; what's left
-is deciding *what* to write about, and tying the three together)
+**Last updated:** 2026-08-18 · **Current phase:** Phase 6 done → Phase 7 (orchestration + polish)
+**Overall:** ▓▓▓▓▓▓▓░ ~86% (foundation, UI shell, BOTH backlink lanes, the in-dashboard
+content agent, and now the Opportunity Finder + keyword engine that decide *what* to write —
+every agent has a working path and they hand off to each other; what's left is Overview
+becoming the conductor, plus a polish pass)
 
 ---
 
@@ -33,7 +34,8 @@ quality content; backlinks are the visible target, not the engine.
 - Content: quality over volume. Answer-first, real stats+sources, sourced quotes,
   question-shaped headings, FAQ, short clean slugs. No fabricated stats/volumes.
 - Keyword research: GSC query data first (striking-distance terms), free autocomplete,
-  optional pluggable paid API. Keyword branch is OPTIONAL.
+  optional pluggable paid API. Keyword branch is OPTIONAL — `KEYWORD_ENGINE=off` and every
+  page degrades to "no keyword data", which is a stated state, not a failure.
 - Model routing via `.env`: cheap for Analysis/Backlink, strongest for Content.
 - WordPress publishing is ALWAYS draft.
 - **Settings now writes `.env` itself** (`core/config.save()`): it preserves comments and
@@ -130,8 +132,26 @@ quality content; backlinks are the visible target, not the engine.
       fabricated-source and unsourced-figure checks, the hard-check gate disabling the
       publish button, `status: draft` in the posted payload, image *briefs* never being
       uploaded as media, and Lane A's payload being unchanged by the new Article fields.
-- [ ] **Phase 6 — Opportunity Finder + optional Keyword engine** ← next
-- [ ] **Phase 7 — Orchestration & polish**
+- [x] **Phase 6 — Opportunity Finder + optional Keyword engine** — a new **Opportunities**
+      page (sidebar, between Analysis and Content) with two tabs. The Finder scans
+      competitors (their sitemap + a `site:` search, robots-respecting, capped at 3 sites /
+      4 pages), your own coverage and your Search Console queries, and returns a ranked list
+      of four kinds of opportunity — striking distance, competitor gap, tool with no
+      article, rejected-on-quality rewrite — each with the evidence behind it. Every card
+      hands off: **Write this** fills the Content page's topic/keyword/direction, **Target
+      with links** preselects the page in Lane A's target picker. The keyword engine
+      (`core/keywords.py`) is GSC-first, expands with the skill's free autocomplete adapter,
+      and has a paid slot that stays empty by default. It's switchable in Settings.
+      *Note:* this environment's proxy blocks general outbound HTTPS, so no competitor site,
+      no live Google autocomplete and no real Search Console property was reached from here.
+      What *was* verified, with stubs: the bands (position 2 → winning, 12 → striking, 44 →
+      deep, 5 impressions → not striking), the "never invent a volume" rule end to end, the
+      whole page driven by Streamlit's AppTest (scan → cards → Write this → Content with the
+      topic filled → Use a keyword → Target with links → Backlinks with the page
+      preselected and its keywords listed), the engine switched **off** across all four
+      pages, robots.txt Disallow being honoured, and a dead search provider leaving a note
+      instead of an exception. First real run: **Opportunities → Scan for opportunities**.
+- [ ] **Phase 7 — Orchestration & polish** ← next
 
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
@@ -214,16 +234,51 @@ quality content; backlinks are the visible target, not the engine.
   images (or briefs), "create the WordPress draft" / "save to outputs only", and a list of
   recent runs. A draft failing a hard check can't be filed until you tick past it.
 
-## Next up (start here)
-**Phase 6 — Opportunity Finder + optional Keyword engine.** Read `PHASES.md` → Phase 6,
-then `.claude/skills/competitor-site-scraper/SKILL.md` and
-`.claude/skills/keyword-researcher/SKILL.md`. Reuse `core/search.py` for the competitor
-scan (it already handles four providers and fails soft), `core/gsc.py` for
-striking-distance queries, and hand the result straight into the Content page's topic +
-primary-keyword boxes (`content_topic` / `content_keyword`) and Lane A's target picker.
-The keyword branch must stay optional — GSC-first works with no paid key.
+- **`core/keywords.py`** (Phase 6) — the keyword engine, the skill's priority order in code.
+  `gsc_keywords()` reads the `query` dimension and bands every term (**Already winning** <4,
+  **Striking distance** 4-20 with ≥10 impressions, **Ranking deep** >20, **Unvalidated**);
+  `page_map()` ties each query back to the page that ranks for it; `for_page()` is what the
+  backlink targeter shows; `brief()` picks a primary the skill's way (striking distance →
+  paid volume → autocomplete-confirmed → the topic itself, flagged). Autocomplete and the
+  paid slot are *loaded from the skill's own* `assets/keyword_adapter.py` by path — the same
+  trick `core/images.py` uses — so wiring a provider there lights up both paths at once.
+- **A volume is never invented.** `Keyword.volume` stays `None` unless a paid provider
+  returned a number, `volume_label` prints the word "unvalidated" in its place, and a term
+  with no impressions and no volume says so on its own card.
+- **`agents/opportunity.py`** (Phase 6) — the Finder. `find_competitors()` (top independent
+  domains for your niche; your own sites and the social/aggregator list excluded),
+  `map_competitor()` (robots.txt for the sitemap it advertises → topics, a `site:` search →
+  real titles, and optionally 4 pages read for their question headings, with a delay
+  between fetches), `own_coverage()` (your tools, your articles, your rejected pages),
+  and four generators merged into one ranked list. It reuses Lane B's `domain_of`, `_fetch`
+  and exclusion list, and `gsc.discover_urls` for sitemap walking, rather than re-solving them.
+- **A score is a summary of listed reasons, not an authority** — the same rule as Lane B's
+  prospect scores. Every opportunity prints the evidence that produced it.
+- **Opportunities page** — Finder tab (readiness strip, niche + competitors, the caps
+  exposed as controls, ranked cards with evidence/angle/hand-off buttons, what each
+  competitor covers, CSV export) and Keywords tab (load your queries, the striking-distance
+  table, a brief builder, CSV export). Off, the Keywords tab is an empty state with the
+  three steps to switch it on.
+- **The three agents now hand off to each other.** Opportunity → Content
+  (`content_topic` / `content_keyword` / `content_notes`), Opportunity or keyword →
+  Backlinks (`bl_focus_url` preselects Lane A's target, and says so if the page isn't
+  link-eligible). Lane A's chosen target now lists the keywords it's closest on, marked 🎯
+  for striking distance, from your own Search Console data.
+- Content page gained an optional "pick the keyword from real data" expander; Overview's
+  to-do list ends with "Decide what to write next" → Opportunities; Settings gained the
+  **Keyword engine** switch and a per-site **Competitor sites** box (`TV_COMPETITORS` /
+  `TA_COMPETITORS`).
 
-**Worth doing before Phase 6:**
+## Next up (start here)
+**Phase 7 — Orchestration & polish.** Read `PHASES.md` → Phase 7, then `app.py`, everything
+in `agents/` and `ui/`. Overview becomes the conductor: run the analysis, show the
+recommendation, and launch the content/backlink action from there. The hand-off plumbing
+Phase 6 built is what to reuse — `st.session_state` keys `content_topic` /
+`content_keyword` / `content_notes` for the writer, `bl_focus_url` for Lane A's target
+picker, and `nav` to change page — so Overview can drive the same flow the Opportunities
+cards already do. Finish with a consistency pass on the UI and a `README.md` refresh.
+
+**Worth doing before Phase 7:**
 - Write one real article: add an OpenRouter key + a Content model, type a topic, and
   press **Research and write the draft**. That's the only way to see the drafting prompt
   and the quality checks against a live model. If DuckDuckGo throttles the research step,
@@ -233,12 +288,18 @@ The keyword branch must stay optional — GSC-first works with no paid key.
 - Run Lane A once for real (dev.to key + "save as an unpublished draft").
 - Run **Settings → Prospecting → Test search**, then prospect once for a real target page.
 - Send one guest pitch by hand (copy path) before wiring SMTP.
+- Run **Opportunities → Scan for opportunities** once against a real competitor domain —
+  it's the only way to see how a real sitemap and real page titles come back. Save the
+  competitors permanently in **Settings → Sites → Competitor sites**.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Run **Settings → Test connections** with the real service-account file, so live GSC
   and GA4 are confirmed against the actual properties.
 - Image API name (currently dummy → writes image briefs).
-- Keyword API name (optional; GSC-first works free).
+- Keyword API name (optional; GSC-first works free — the engine runs without it and simply
+  shows no volumes).
+- Competitor domains per site, if you'd rather name them than have the Finder search for
+  them (**Settings → Sites → Competitor sites**).
 - WordPress username + Application Password per site (now editable per site in Settings).
 - Confirm toolacademy.com is self-hosted WordPress.
 - **`daily_backlink_job.py`** — it was meant to be ported in Phase 3 but never reached the
