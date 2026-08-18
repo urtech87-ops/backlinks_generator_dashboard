@@ -16,11 +16,12 @@ goes live — WordPress is always a draft.
 import streamlit as st
 
 from agents import content as agent
-from core import config, images as image_api, search
+from core import config, images as image_api, keywords as kw, search
 from ui import components as c
 from ui import data as d
 
 RUN = "content_run"          # session state: the current topic → draft → images run
+KEYWORD_BRIEF = "content_kw_brief"   # session state: the last keyword brief
 
 
 SKILLS = [
@@ -78,13 +79,16 @@ def _writer(ctx, coverage_df) -> None:
         "Primary keyword (optional)", key="content_keyword",
         placeholder="e.g. compress jpeg without losing quality",
         help="Leave blank and the agent picks the phrase it thinks people search for. "
-             "The Keyword engine that fills this in for you is Phase 6.",
+             "Or fill it from your own Search Console data with the keyword engine "
+             "below.",
     )
     notes = cols[1].text_input(
         "Anything the writer should know (optional)", key="content_notes",
         placeholder="e.g. aimed at photographers, mention batch processing",
         help="Free text passed to the model — an angle, an audience, a use-case.",
     )
+
+    _keyword_helper(ctx, topic)
 
     options = agent.internal_link_options(coverage_df, site)
     if options:
@@ -128,6 +132,60 @@ def _writer(ctx, coverage_df) -> None:
 
     _research_summary(run["research"])
     _review(site, run)
+
+
+def _keyword_helper(ctx, topic: str) -> None:
+    """
+    The keyword engine (Phase 6) feeding the writer: real Search Console terms
+    first, free autocomplete second. Optional — switched off, this is one line
+    saying so, and the writer picks its own phrase as it always did.
+    """
+    if not kw.enabled():
+        st.caption("The keyword engine is switched off, so the writer will choose the "
+                   "phrase itself. Turn it on in Settings → Content tools to target a "
+                   "keyword you already get impressions for.")
+        return
+
+    with st.expander("🔑 Pick the keyword from real data instead of guessing"):
+        st.caption(kw.status())
+        if st.button("Build a keyword brief for this topic", key="content_kw_build",
+                     disabled=not topic.strip()):
+            with st.spinner("Matching your Search Console queries, then expanding…"):
+                st.session_state[KEYWORD_BRIEF] = {
+                    "site": ctx.site.key,
+                    "brief": kw.brief(topic, ctx.site, ctx.start, ctx.end),
+                }
+
+        state = st.session_state.get(KEYWORD_BRIEF) or {}
+        brief = state["brief"] if state.get("site") == ctx.site.key else None
+        if not brief:
+            st.caption("Nothing built yet. The full picture — striking-distance terms, "
+                       "the secondary cluster, the questions — lives on the "
+                       "Opportunities page.")
+            c.nav_button("Open the keyword engine", "Opportunities",
+                         key="content_kw_nav")
+            return
+
+        if not brief.ok:
+            st.warning(brief.detail, icon="⚠️")
+        if brief.notes:
+            st.caption(brief.notes)
+
+        for i, candidate in enumerate(brief.cluster[:8]):
+            cols = st.columns([4, 2, 1])
+            label = "unvalidated" if candidate.unvalidated else candidate.band
+            cols[0].markdown(f"**{candidate.keyword}**")
+            cols[0].caption(candidate.reason)
+            with cols[1]:
+                c.show_badge("warn" if candidate.unvalidated else "ok", label)
+            cols[2].button("Use", key=f"content_kw_use_{i}",
+                           on_click=lambda k=candidate.keyword:
+                               st.session_state.update({"content_keyword": k}),
+                           help="Puts this in the primary keyword box above.")
+
+        if brief.questions:
+            st.caption("Questions worth answering in the FAQ: "
+                       + " · ".join(brief.questions[:6]))
 
 
 def _run(site, topic: str, keyword: str, notes: str, internal: list) -> None:
@@ -427,5 +485,11 @@ def _readiness_rows(site: config.Site) -> list:
         "name": "Images", "state": "ok" if image_api.live() else "idle",
         "label": image_api.provider(),
         "detail": image_api.status(),
+    })
+
+    rows.append({
+        "name": "Keyword engine", "state": "ok" if kw.enabled() else "idle",
+        "label": "on" if kw.enabled() else "off",
+        "detail": kw.status(),
     })
     return rows

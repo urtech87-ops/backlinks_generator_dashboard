@@ -57,6 +57,10 @@ def site_fields(prefix: str, label: str) -> list[Field]:
         Field(f"{prefix}_WP_APP_PASSWORD", "WordPress application password",
               "WP Admin → Users → Profile → Application Passwords. Not your login password.",
               kind="password", secret=True),
+        Field(f"{prefix}_COMPETITORS", "Competitor sites",
+              "Comma-separated domains the Opportunity Finder compares you against. "
+              "Leave blank and it finds them by searching your niche instead.",
+              placeholder="example.com, another-site.com"),
     ]
 
 
@@ -106,6 +110,13 @@ CONTENT_TOOLS = Group(
               kind="password", secret=True),
         Field("IMAGE_MODEL", "Image model",
               "The model name your image provider expects."),
+        Field("KEYWORD_ENGINE", "Keyword engine",
+              "Optional. On, it reads the queries you already rank for in Search Console, "
+              "flags striking-distance terms and expands them with free Google "
+              "autocomplete. Off, every page simply stops offering keyword data.",
+              kind="select", options=("on", "off"),
+              option_labels={"on": "On — Search Console first, autocomplete second",
+                             "off": "Off — no keyword data anywhere"}),
         Field("KEYWORD_API_PROVIDER", "Keyword provider",
               "Optional. Search Console query data already gives you real keywords for free.",
               placeholder="dummy"),

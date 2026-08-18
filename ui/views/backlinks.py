@@ -20,7 +20,7 @@ import streamlit as st
 
 from agents import backlink as bl
 from agents import outreach as out
-from core import config, mailer, search, tracker
+from core import config, keywords as kw, mailer, search, tracker
 from core.classifier import HEALTHY, CRAWL_BUDGET
 from publishers import PLATFORMS, blogger
 from publishers.base import Article
@@ -112,6 +112,21 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
                    "eligible list rather than a performance ranking — the ordering is "
                    "unvalidated.")
 
+    # The Opportunity Finder and the keyword engine both hand pages over to this
+    # picker. Setting the widget's key before it's drawn preselects it.
+    focus = st.session_state.pop("bl_focus_url", "")
+    if focus:
+        match = next((i for i, t in enumerate(targets)
+                      if t.url.rstrip("/") == focus.rstrip("/")), None)
+        if match is None:
+            st.info(f"`{focus}` was sent over from another page, but it isn't link-eligible "
+                    "— only indexed and discovered-but-uncrawled pages are offered here. "
+                    "The Fix Plan is where that page belongs first.")
+        else:
+            st.session_state["bl_target_pick"] = match
+            st.success(f"Preselected `{focus}`, sent over from the Opportunities page.",
+                       icon="💡")
+
     choice = st.selectbox(
         "Target page", options=list(range(len(targets))),
         format_func=lambda i: f"{_opportunity_icon(targets[i])} {targets[i].page}"
@@ -131,6 +146,7 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
                 ("Avg position", target.position or "—"),
                 ("Opportunity score", target.score),
             ])
+        _target_keywords(ctx, target)
 
     with st.expander(f"See all {len(targets)} eligible pages"):
         st.dataframe(
@@ -222,6 +238,28 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
 
     _review_and_publish(site, drafts)
     _tracker_section(site)
+
+
+def _target_keywords(ctx, target) -> None:
+    """
+    Which keywords this page is closest on — the keyword engine feeding the
+    targeter (Phase 6). Off, or with no Search Console, this simply says nothing.
+    """
+    if not (kw.enabled() and ctx.creds):
+        return
+    found = kw.for_page(ctx.site, target.url, ctx.start, ctx.end)
+    if not found:
+        return
+    striking = kw.striking_distance(found)
+    st.caption("**Keywords this page is closest on** — from your own Search Console data, "
+               f"{ctx.start} → {ctx.end}.")
+    for keyword in found[:5]:
+        mark = "🎯" if keyword in striking else "•"
+        st.caption(f"{mark} {keyword.keyword} — position {keyword.position}, "
+                   f"{keyword.impressions:,} impressions")
+    if striking:
+        st.caption("🎯 = striking distance. A link to this page is most likely to pay off "
+                   "on those terms.")
 
 
 def _opportunity_icon(target) -> str:
