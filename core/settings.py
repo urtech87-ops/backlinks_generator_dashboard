@@ -18,6 +18,7 @@ class Field:
     help: str                      # one-line helper text under the input
     kind: str = "text"             # text | password | select
     options: tuple = ()            # for kind="select"
+    option_labels: dict = dc_field(default_factory=dict)   # value -> plain-language name
     placeholder: str = ""
     secret: bool = False           # never echo the saved value back into the UI
 
@@ -134,14 +135,40 @@ PLATFORMS = Group(
     ],
 )
 
+PROSPECTING = Group(
+    "prospecting", "Guest-post prospecting (search)",
+    "How Lane B finds sites that accept guest posts. DuckDuckGo needs no key and "
+    "works out of the box; a paid provider is steadier if you prospect often.",
+    [
+        Field("SEARCH_API_PROVIDER", "Search provider",
+              "Where prospect searches run. DuckDuckGo is free but can throttle a "
+              "burst of queries.",
+              kind="select",
+              options=("duckduckgo", "serper", "serpapi", "brave"),
+              option_labels={
+                  "duckduckgo": "DuckDuckGo — free, no key (best effort)",
+                  "serper": "Serper.dev — Google results, needs a key",
+                  "serpapi": "SerpAPI — needs a key",
+                  "brave": "Brave Search API — needs a key",
+              }),
+        Field("SEARCH_API_KEY", "Search API key",
+              "Only needed when the provider above isn't DuckDuckGo.",
+              kind="password", secret=True),
+    ],
+)
+
 EMAIL = Group(
     "email", "Outreach email (optional)",
-    "Only used to send guest-post pitches you have already approved. Leave blank "
-    "to copy-paste pitches by hand instead.",
+    "Only used to send guest-post pitches you have already read and approved, one "
+    "click at a time. Leave it blank and Lane B still works — you copy the pitch and "
+    "send it from your own mailbox.",
     [
         Field("OUTREACH_FROM_EMAIL", "Send pitches from",
               "The address hosts will see and reply to.",
               placeholder="you@example.com"),
+        Field("OUTREACH_FROM_NAME", "Your name",
+              "Used to sign the pitch and as the From name. Editors reply to people.",
+              placeholder="Alex Smith"),
         Field("SMTP_HOST", "SMTP host",
               "Your mail provider's outgoing server.", placeholder="smtp.gmail.com"),
         Field("SMTP_PORT", "SMTP port",
@@ -154,7 +181,7 @@ EMAIL = Group(
     ],
 )
 
-GROUPS = [GOOGLE, MODELS, CONTENT_TOOLS, PLATFORMS, EMAIL]
+GROUPS = [GOOGLE, MODELS, CONTENT_TOOLS, PLATFORMS, PROSPECTING, EMAIL]
 
 # Model pickers need a live option list, so the Settings page fills these in.
 MODEL_FIELD_KEYS = ("ANALYSIS_MODEL", "BACKLINK_MODEL", "CONTENT_MODEL")

@@ -47,6 +47,27 @@ WordPress application password. Then on **Backlinks → Auto-publish**:
 4. **Publish.** Tick *save as an unpublished draft* for a first run. Every attempt, live
    or failed, lands in `data/backlinks.csv`.
 
+## Earning a guest post (Lane B)
+Human-gated by design. The agent prospects, scores and writes; **you** approve every
+send, and the host decides whether to publish. Nothing here can post to a site you
+don't own. On **Backlinks → Guest outreach**:
+
+1. **Pick the target page** — the same ranking Lane A uses.
+2. **Find prospects.** Searches the phrases sites use when they *want* contributors
+   (`"write for us"`, `"guest post guidelines"`, …) in your niche, reads each page, and
+   scores it on relevance and on whether it looks editorially run. Sites that sell links
+   are marked **skip** — buying links is a guidelines violation. You can also add a site
+   by hand. Search runs through **Settings → Prospecting**: DuckDuckGo needs no key;
+   Serper, SerpAPI or Brave are steadier.
+3. **Shortlist** what's worth your time — saved to the tracker as *prospected*. Nothing
+   has been contacted at this point.
+4. **Draft** a personalised pitch and, if you want, the guest article itself. The pitch
+   is checked for mail-merge and link-request wording before you send it.
+5. **Approve and send.** With SMTP configured (**Settings → Outreach email**) you tick
+   an approval box and send one pitch with one click; without it you copy the pitch and
+   send it from your own mailbox. Either way you mark it, and the **outreach board**
+   tracks prospected → pitched → accepted → live, declines included.
+
 ## Pages
 | Page | What it's for |
 |---|---|
@@ -59,8 +80,10 @@ WordPress application password. Then on **Backlinks → Auto-publish**:
 ## Layout
 ```
 app.py              Streamlit entry — sidebar + page dispatch
-core/               config, settings schema, gsc, ga4, openrouter, classifier, seed, tracker
-agents/             backlink.py (Lane A) · analysis / content still to come
+core/               config, settings schema, gsc, ga4, openrouter, classifier, seed,
+                    tracker, search (prospecting), mailer (optional pitch send)
+agents/             backlink.py (Lane A) · outreach.py (Lane B) · analysis / content
+                    still to come
 publishers/         one module per platform you own: dev.to, Blogger, your WordPress
 ui/                 components + data loader + one module per page in views/
 .claude/skills/     the SEO/AEO/GEO content agent (quality path)
@@ -72,4 +95,6 @@ PROGRESS.md         living status — paste into a fresh chat to resume
 ## Ground rules the code enforces
 - WordPress publishing is **always a draft**.
 - Auto-publishing only ever targets platforms you own; guest posts wait for your click.
+- Outreach sends nothing by itself: one pitch, one approval, one click — and no scaled
+  or keyword-stuffed campaigns.
 - No fabricated statistics or keyword volumes — no data means it says so.

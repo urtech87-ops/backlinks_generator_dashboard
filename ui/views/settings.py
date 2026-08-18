@@ -8,7 +8,8 @@ shows "saved" rather than the value, and leaving it blank keeps what's there.
 
 import streamlit as st
 
-from core import config, ga4, gsc, openrouter, settings as schema
+from core import (config, ga4, gsc, mailer, openrouter, search,
+                  settings as schema)
 from ui import components as c
 
 
@@ -25,7 +26,8 @@ def render(ctx) -> None:
     st.write("")
 
     tabs = st.tabs(["🌐 Sites", "🔑 Google APIs", "🤖 AI models",
-                    "🎨 Content tools", "🔗 Backlink platforms", "✉️ Outreach email"])
+                    "🎨 Content tools", "🔗 Backlink platforms", "🔎 Prospecting",
+                    "✉️ Outreach email"])
 
     with tabs[0]:
         _sites_tab()
@@ -38,7 +40,9 @@ def render(ctx) -> None:
     with tabs[4]:
         _group_tab(schema.PLATFORMS)
     with tabs[5]:
-        _group_tab(schema.EMAIL)
+        _prospecting_tab()
+    with tabs[6]:
+        _email_tab()
 
 
 # ── Shared field rendering ─────────────────────────────────────────────────
@@ -51,6 +55,17 @@ def _field_input(field: schema.Field, default: str = ""):
     the user didn't retype.
     """
     saved = config.is_set(field.key)
+
+    if field.kind == "select" and field.options:
+        options = list(field.options)
+        current = config.get(field.key, default or options[0])
+        if current not in options:
+            options.append(current)
+        return st.selectbox(
+            field.label, options, index=options.index(current),
+            key=f"in_{field.key}", help=field.help,
+            format_func=lambda v: field.option_labels.get(v, v),
+        )
 
     if field.kind == "password" or field.secret:
         val = st.text_input(
@@ -81,6 +96,36 @@ def _group_tab(group: schema.Group) -> None:
     values = {f.key: _field_input(f) for f in group.fields}
     if st.button("💾 Save", key=f"save_{group.key}", type="primary"):
         _save(values, group.title.lower())
+
+
+# ── Prospecting + outreach email ───────────────────────────────────────────
+def _prospecting_tab() -> None:
+    _group_tab(schema.PROSPECTING)
+
+    st.caption(f"Currently prospecting with **{search.PROVIDERS[search.provider()]}**. "
+               "Lane B only ever *reads* search results — it never posts anywhere.")
+    if st.button("🔌 Test search", key="test_search",
+                 help="Runs one real search so you know prospecting will work before "
+                      "you rely on it."):
+        with st.spinner("Running a test search…"):
+            result = search.check()
+        (st.success if result["ok"] else st.error)(result["detail"])
+
+
+def _email_tab() -> None:
+    _group_tab(schema.EMAIL)
+
+    st.info("Email is optional and never automatic. The only thing that can send a "
+            "pitch is the approval button on the Backlinks page, one pitch per click. "
+            "Leave this blank and you copy the pitch instead.", icon="🛡️")
+    gaps = mailer.missing()
+    if gaps:
+        st.caption(f"Not ready to send yet — still missing: {', '.join(gaps)}.")
+    elif st.button("🔌 Test the mail login", key="test_smtp",
+                   help="Connects and logs in. Sends nothing."):
+        with st.spinner("Logging in to your mail server…"):
+            result = mailer.check()
+        (st.success if result["ok"] else st.error)(result["detail"])
 
 
 # ── Sites ──────────────────────────────────────────────────────────────────

@@ -161,18 +161,24 @@ def rank_targets(site, coverage_df, start: str = "", end: str = "",
 
 
 # ── 2. Draft the article ───────────────────────────────────────────────────
-def page_facts(url: str, timeout: int = 10) -> dict:
+def page_facts(url: str, timeout: int = 10, html: str = "") -> dict:
     """
-    Read the target page's own title, meta description and first heading, so the
-    article is written about what the page actually is rather than a guess from
-    its slug. Returns {} if the page can't be fetched — the caller falls back to
-    the slug and says so.
+    Read a page's own title, meta description and first heading, so the article
+    is written about what the page actually is rather than a guess from its
+    slug. Returns {} if the page can't be fetched — the caller falls back to the
+    slug and says so.
+
+    Pass `html` when you have already fetched the page (Lane B reads a prospect's
+    guidelines page for scoring) so this parses it instead of fetching it twice.
     """
     try:
-        r = requests.get(url, timeout=timeout,
-                         headers={"User-Agent": "seo-command-center"})
-        r.raise_for_status()
-        html = r.text[:200_000]
+        if html:
+            html = html[:200_000]
+        else:
+            r = requests.get(url, timeout=timeout,
+                             headers={"User-Agent": "seo-command-center"})
+            r.raise_for_status()
+            html = r.text[:200_000]
         def grab(pattern):
             m = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
             return re.sub(r"\s+", " ", m.group(1)).strip() if m else ""

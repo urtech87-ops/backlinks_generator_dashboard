@@ -5,9 +5,9 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-17 · **Current phase:** Phase 3 done → Phase 4 (guest outreach)
-**Overall:** ▓▓▓▓░░░ ~50% (foundation, UI shell and the backlink agent's auto-publish
-lane are done; guest outreach + the content agent to go)
+**Last updated:** 2026-08-18 · **Current phase:** Phase 4 done → Phase 5 (content agent)
+**Overall:** ▓▓▓▓▓░░ ~60% (foundation, UI shell and BOTH backlink lanes are done — the
+user's main target is built end to end; the content agent's in-dashboard path is next)
 
 ---
 
@@ -48,6 +48,18 @@ quality content; backlinks are the visible target, not the engine.
 - **Link targets are gated on indexing.** Only `Healthy` (compound) and `Crawl budget`
   (rescue) pages are offered as targets. Broken and quality-rejected pages are excluded,
   because a link to those is wasted — the same honest framing as the Fix Plan.
+- **Lane B is a funnel with a person standing in it.** The agent searches, scores and
+  writes; every state change is a click. The only outbound action in the whole lane is
+  one email, sent one at a time, after an explicit "I have read this pitch" tick — and
+  `publishers/PLATFORMS` still has no third-party entry, so there is no code path that
+  posts to someone else's site.
+- **Prospect scores are evidence, not authority.** There is no DA/DR anywhere: a score
+  is built only from what's on the page (your niche words, real editorial guidelines, a
+  contact address, an ordinary domain) and every point is listed back to you in plain
+  language. Pages that advertise paid placement are forced to **skip** — buying links is
+  a guidelines violation, not a low-quality option.
+- **Declines are kept.** The board tracks declines on purpose: they're what stops you
+  pitching the same editor twice.
 - **No invented performance numbers.** With Search Console connected, targets rank on
   real impressions + average position. Without it, the page says so and shows the
   eligible list *unranked* rather than inventing a score.
@@ -79,8 +91,19 @@ quality content; backlinks are the visible target, not the engine.
       different, replace **only** that function. Everything is verified against mocked
       APIs; none of the three has been run against a real account from here, because
       there are no platform keys in this environment.
-- [ ] **Phase 4 — Backlink agent · Lane B (guest outreach)** ← next
-- [ ] **Phase 5 — Content + SEO agent (volume path)**
+- [x] **Phase 4 — Backlink agent · Lane B (guest outreach)** — prospecting from search
+      footprints (`"write for us" + niche`), a transparent relevance/quality score per
+      prospect, a personalised pitch + a tailored guest article per site, and an outreach
+      board running prospected → pitched → accepted → declined → live in the SAME
+      `data/backlinks.csv` Lane A writes to (new `lane` column). Sending email is
+      optional and sits behind an approval tick-box; with no SMTP you copy the pitch.
+      *Note:* this environment's proxy blocks general outbound HTTPS, so neither the live
+      search nor the page reader could be run against real sites from here. What *was*
+      verified: the failure path (a blocked DuckDuckGo returns a plain "throttled — add a
+      key" message instead of crashing), the tracker's migration + stage folding, and the
+      whole Lane B UI driven end to end with Streamlit's AppTest against stubbed
+      prospects. First real run: **Settings → Prospecting → Test search**.
+- [ ] **Phase 5 — Content + SEO agent (volume path)** ← next
 - [ ] **Phase 6 — Opportunity Finder + optional Keyword engine**
 - [ ] **Phase 7 — Orchestration & polish**
 
@@ -97,7 +120,7 @@ quality content; backlinks are the visible target, not the engine.
   bucket counts, and a system-status strip showing what's connected.
 - The Content page is still an honest placeholder — it states what Phase 5 will build and
   shows live readiness (WordPress creds, models, image provider) instead of dead buttons.
-  Backlinks Lane A is now real (below); Lane B keeps the placeholder until Phase 4.
+  Both Backlinks lanes are now real (below).
 - Six content skills in `.claude/skills/` (orchestrator, brand + competitor scrapers,
   keyword researcher, SEO/AEO/GEO writer, image generator, WordPress publisher) with
   pluggable image + keyword adapters (dummy defaults).
@@ -114,28 +137,49 @@ quality content; backlinks are the visible target, not the engine.
   failures, with `load()` / `summary()` for the UI and a CSV export.
 - **`core/openrouter.chat()`** — the completion call the agents write with; handles 401 /
   402 / 404 with plain-language messages. Phase 5's content agent can reuse it as-is.
+- **`agents/outreach.py`** (Lane B) — `find_prospects()` (five "write for us" footprints
+  plus your own searches, deduped per domain, own/social/marketplace domains excluded),
+  `score()` (relevance + quality out of 50 each, penalties for link sellers, a written
+  reason per point), `prospect_from_url()` (score a site you already know),
+  `draft_pitch()` + `pitch_checks()` (flags mail-merge and link-request wording), and
+  `draft_guest_article()`. It reuses Lane A's `rank_targets`, `page_facts`, `_parse_json`
+  and `_SYSTEM` rather than duplicating them; `page_facts()` gained an optional `html=`
+  argument so a page fetched for scoring isn't fetched twice.
+- **`core/search.py`** — the pluggable prospecting search: `duckduckgo` (default, no key),
+  `serper`, `serpapi`, `brave`, plus `check()` behind a Settings test button. Read-only.
+- **`core/mailer.py`** — optional SMTP. `send()` is called from exactly one place: the
+  approval button. `check()` logs in without sending.
+- **`core/tracker.py`** — now two lanes in one file via a `lane` column (an older CSV is
+  migrated on first write, so Phase 3's rows survive). `log_guest()` appends one row per
+  stage change; `guest_board()` folds that history into the current stage per prospect;
+  `guest_summary()` feeds the board's metric row.
+- Backlinks page Lane B is live: a readiness strip, the same target picker, prospect
+  search + hand-added sites, a scored list with the evidence behind each score, a
+  shortlist button, per-prospect pitch and article editors (with the link-count check),
+  the approval/send step, and the outreach board with stage controls and a CSV export.
 - Backlinks page Lane A is live: platform readiness naming the exact missing settings,
   a ranked target picker, a per-platform draft editor with a link-count check
   (0 links → error, 2+ → "this reads as link-building"), a "save as draft everywhere"
   option for a first run, and the tracker.
 
 ## Next up (start here)
-**Phase 4 — Backlink agent, Lane B (guest outreach).** Read `PHASES.md` → Phase 4, then
-`agents/backlink.py` (reuse `draft_article`'s prompt shape and `_parse_json`) and
-`core/tracker.py` (the same CSV takes Lane B's stages via the `status` column — add
-`prospected` / `pitched` / `accepted` to `STATUS_LABEL` rather than starting a second
-file). Lane B's tab is in `ui/views/backlinks.py → _lane_b()`, still a `coming_soon`
-block. The email settings it needs (`OUTREACH_FROM_EMAIL`, `SMTP_*`) already exist in
-`core/settings.py` and `.env.example`.
+**Phase 5 — Content + SEO agent (volume path).** Read `PHASES.md` → Phase 5, then
+`.claude/skills/blog-writer-seo-aeo-geo/SKILL.md` (the quality path this fast path has to
+stay consistent with) and `.claude/skills/wordpress-publisher/assets/publish.py`. Reuse
+`core/openrouter.chat()` and `agents/backlink._parse_json` for the JSON-mode drafting,
+and `publishers/wordpress.py` for the draft (status is hard-coded to `draft` there —
+leave it that way). The Content page is still the honest placeholder in
+`ui/views/content.py`.
 
-**The one hard rule for Phase 4:** do not add a publisher for third-party sites.
-`publishers/PLATFORMS` stays owned-platforms-only; outreach drafts a pitch and stops, a
-human clicks send, and the host publishes.
-
-**Before Phase 4, worth doing:** run Lane A once for real. Add a dev.to API key in
-Settings, pick a target page, tick "save as an unpublished draft", and publish — that
-confirms the drafting prompt and the dev.to publisher against a live account, which
-nothing in this environment could.
+**Worth doing before Phase 5, now that both link lanes exist:**
+- Run Lane A once for real: add a dev.to API key, tick "save as an unpublished draft",
+  publish. That's the only way to confirm the drafting prompt and the dev.to publisher
+  against a live account.
+- Run **Settings → Prospecting → Test search**, then find prospects once for a real
+  target page. If DuckDuckGo throttles you, add a Serper key — the provider is a
+  dropdown, nothing else changes.
+- Send one pitch by hand (copy path) before wiring SMTP. The board doesn't care which
+  way it went out, and it tells you whether the pitch reads like a person wrote it.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Run **Settings → Test connections** with the real service-account file, so live GSC
@@ -150,4 +194,7 @@ nothing in this environment could.
   swap `publishers/blogger.py → _access_token()` for the original.
 - Platform keys to actually switch Lane A on: dev.to API key, and/or the four Blogger
   values (blog ID, client ID, client secret, refresh token).
-- Email/SMTP for the optional guest-outreach send (else copy-paste pitches).
+- Email/SMTP for the optional guest-outreach send (else copy-paste pitches) — plus
+  `OUTREACH_FROM_NAME`, which signs the pitch.
+- Optional: a search API key (Serper / SerpAPI / Brave) if DuckDuckGo throttles
+  prospecting. Set the provider in **Settings → Prospecting**.
