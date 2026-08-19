@@ -5,19 +5,23 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-18 · **Current phase:** Phase 6 done → Phase 7 (orchestration + polish)
-**Overall:** ▓▓▓▓▓▓▓░ ~86% (foundation, UI shell, BOTH backlink lanes, the in-dashboard
-content agent, and now the Opportunity Finder + keyword engine that decide *what* to write —
-every agent has a working path and they hand off to each other; what's left is Overview
-becoming the conductor, plus a polish pass)
+**Last updated:** 2026-08-19 · **Current phase:** Phase 7 done — **the build is complete**
+**Overall:** ▓▓▓▓▓▓▓▓ 100% (all seven phases shipped. Overview is now the conductor: it runs
+the Analysis agent, ranks every page by what it needs, and launches the fix / rewrite /
+link / strengthen action on the page that does it. The UI had its consistency pass and
+README describes the finished system. What's left is not building — it's running the thing
+against real keys; see **First real run** below.)
 
 ---
 
 ## System in one paragraph
 
-Streamlit dashboard = conductor for two sites (toolsvenue.com, toolacademy.com). Three
-agents: **Analysis** (OpenRouter, cheap) reads Search Console + GA4, triages not-indexed
-pages into Plumbing / Content / Crawl-budget and ranks winners; **Content + SEO** (strongest model)
+Streamlit dashboard = conductor for two sites (toolsvenue.com, toolacademy.com). The
+**Overview** page is the conductor in the literal sense: it runs the Analysis agent and
+launches every other agent's work from the pages that come back. Three agents:
+**Analysis** (`agents/analysis.py`, OpenRouter cheap for its optional written briefing)
+reads Search Console + GA4, triages not-indexed pages into Plumbing / Content /
+Crawl-budget, ranks winners, and turns all of it into an ordered to-do list; **Content + SEO** (strongest model)
 writes SEO/AEO/GEO articles → WordPress drafts, on two paths: the volume path in the
 Content page, and the deeper quality path in `.claude/skills/`;
 **Backlink** (OpenRouter, cheap — the MAIN TARGET) runs two lanes: auto-publish to owned
@@ -151,7 +155,30 @@ quality content; backlinks are the visible target, not the engine.
       preselected and its keywords listed), the engine switched **off** across all four
       pages, robots.txt Disallow being honoured, and a dead search provider leaving a note
       instead of an exception. First real run: **Opportunities → Scan for opportunities**.
-- [ ] **Phase 7 — Orchestration & polish** ← next
+- [x] **Phase 7 — Orchestration & polish** — a new **`agents/analysis.py`** (the triage
+      everything is conducted from) and an Overview page that is now the conductor:
+      **Run the analysis** reads coverage + Search Console performance + your queries in
+      one pass, and sorts every page into one of five things it needs — 🔴 fix the URL,
+      🟠 rewrite it, 🗑️ delete/noindex it, 🟢 build links to it, 🎯 strengthen it for a
+      keyword. The ordered to-do list opens onto the actual pages behind each step, each
+      with the button that does the job: fix → Analysis with the Fix Plan filtered to that
+      bucket and the page called out, rewrite/strengthen → Content with topic, keyword and
+      direction filled in, link → Backlinks with the target preselected. Plus an optional
+      plain-English briefing written by `ANALYSIS_MODEL` from the measured numbers only —
+      the one place that (previously unused) setting is now spent. Consistency pass: one
+      `c.status_rows()` readiness strip on every page, `metric_row` everywhere, the health
+      figures computed once in the agent so no two pages can disagree, a bucket filter on
+      the Fix Plan with per-bucket hand-offs, "filled in from …" banners on the receiving
+      pages, singular/plural copy, the guardrails listed in the sidebar, and the unused
+      `coming_soon` placeholder deleted. README rewritten for the finished system.
+      *Note:* verified with Streamlit's AppTest — all six pages render for both sites, the
+      whole conductor chain (run → fix / rewrite / link hand-off → the destination page
+      with the boxes filled) drives end to end, the live path with stubbed Search Console
+      figures produces striking-distance recommendations and fetches the `page` dimension
+      exactly **once** per run, the briefing sees only the fact block, and with no
+      credentials that fact block says "Performance figures: NOT AVAILABLE — do not
+      estimate traffic". Still not run against real Google/OpenRouter credentials from
+      here; this environment has none.
 
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
@@ -269,16 +296,52 @@ quality content; backlinks are the visible target, not the engine.
   **Keyword engine** switch and a per-site **Competitor sites** box (`TV_COMPETITORS` /
   `TA_COMPETITORS`).
 
-## Next up (start here)
-**Phase 7 — Orchestration & polish.** Read `PHASES.md` → Phase 7, then `app.py`, everything
-in `agents/` and `ui/`. Overview becomes the conductor: run the analysis, show the
-recommendation, and launch the content/backlink action from there. The hand-off plumbing
-Phase 6 built is what to reuse — `st.session_state` keys `content_topic` /
-`content_keyword` / `content_notes` for the writer, `bl_focus_url` for Lane A's target
-picker, and `nav` to change page — so Overview can drive the same flow the Opportunities
-cards already do. Finish with a consistency pass on the UI and a `README.md` refresh.
+- **`agents/analysis.py`** (Phase 7) — the triage the whole dashboard is conducted from.
+  `health()` is now the single implementation of the indexing figures (`ui.data` delegates
+  to it, so Overview and Analysis can never quote different numbers); `page_metrics()`
+  fetches Search Console performance **once** per run and passes it into
+  `backlink.rank_targets(metrics=…)` — the reason that function gained an optional
+  `metrics` argument — so one report never queries the same dimension twice;
+  `run()` returns a `Report` of ranked `Recommendation`s and the ordered `Step`s Overview
+  draws; `briefing()` is the optional written summary.
+- **Five things a page can need, and one place that decides which.** FIX / REWRITE /
+  PRUNE / LINK / STRENGTHEN, with `KIND_PAGE` and `KIND_CTA` mapping each to the page that
+  carries it out — so a hand-off is data, not a hard-coded button.
+- **A rejected page that was never an article is pruned, not rewritten.** `/feed/`,
+  `/blogs/author/zain/` and category archives come back as 🗑️ *delete or noindex* with
+  their own step, and never reach the writer. `topic_from_url()` returning "" is the test,
+  which is why the writer is never handed a topic like "blogs/author/zain".
+- **Both link steps share a kind, so `Step.bucket` keeps them apart** — "rescue these 10
+  uncrawled pages" and "compound these healthy ones" are different lists of pages, and a
+  rescue target is amber here exactly as it is in the Backlinks target picker.
+- **The briefing can only see measured numbers.** `facts_block()` is the entire input:
+  with no Search Console it literally says "Performance figures: NOT AVAILABLE … Do not
+  estimate traffic", and the deterministic list stays the authority whether or not you
+  ever press the button. It's the only use of `ANALYSIS_MODEL`, which until Phase 7 was a
+  setting the app never spent.
+- **`c.status_rows()`** is now the one readiness strip: Overview's system status, the
+  Content and Opportunities readiness, both Backlinks strips and the content quality
+  checks all draw through it, so "ready" / "not set" / "on" / "off" mean the same thing
+  everywhere. `coming_soon()` is gone — nothing is coming any more.
+- **Every page can say where a hand-off came from.** `content_source` and `bl_focus_from`
+  travel with the topic and the target URL, so the receiving page opens with "Filled in
+  from the Overview — rewrite the page" rather than mysteriously pre-filled boxes.
+- Fix Plan gained a bucket filter (`analysis_bucket`, which Overview sets), a "sent over
+  from the Overview" callout for one page (`analysis_focus`), and per-bucket hand-off
+  buttons; the sidebar gained a plain list of what the app will never do.
 
-**Worth doing before Phase 7:**
+## Next up (start here)
+**The build is done — every phase is ticked.** There is no Phase 8. What the project needs
+now is its first real run: this environment has never had a Google key, an OpenRouter key
+or a platform key, so every path has been verified against stubs and none against a live
+account. Work the list below in order; each item is the first time a piece of this touches
+reality.
+
+**First real run (in this order):**
+- Connect Google: **Settings → Google APIs**, then **Test connections**, then **Refresh
+  live data** in the sidebar. Then **Overview → Run the analysis** — that's the front door
+  for everything below, and with Search Console live it ranks on real impressions and
+  grows a 🎯 striking-distance step it can't show on seed data.
 - Write one real article: add an OpenRouter key + a Content model, type a topic, and
   press **Research and write the draft**. That's the only way to see the drafting prompt
   and the quality checks against a live model. If DuckDuckGo throttles the research step,
@@ -291,6 +354,16 @@ cards already do. Finish with a consistency pass on the UI and a `README.md` ref
 - Run **Opportunities → Scan for opportunities** once against a real competitor domain —
   it's the only way to see how a real sitemap and real page titles come back. Save the
   competitors permanently in **Settings → Sites → Competitor sites**.
+
+## How a fresh chat should read this
+Everything is built, so a new session is maintenance, not construction: read `CLAUDE.md`,
+then this file, then the module you're about to touch — and keep the guardrails
+(draft-only WordPress, owned platforms only, human-gated outreach, no invented numbers).
+The hand-off plumbing between pages is `st.session_state`: `content_topic` /
+`content_keyword` / `content_notes` / `content_source` for the writer, `bl_focus_url` /
+`bl_focus_from` for Lane A's target picker, `analysis_bucket` / `analysis_focus` for the
+Fix Plan, and `nav` to change page. `agents/analysis.py` is what decides *which* of those a
+page gets, and `ui/components.py` is what every page draws with.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Run **Settings → Test connections** with the real service-account file, so live GSC

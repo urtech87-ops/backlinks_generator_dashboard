@@ -21,6 +21,7 @@ from ui import components as c
 from ui import data as d
 
 RUN = "content_run"          # session state: the current topic → draft → images run
+CHECK_LABEL = {"ok": "pass", "warn": "check", "bad": "fix this"}
 KEYWORD_BRIEF = "content_kw_brief"   # session state: the last keyword brief
 
 
@@ -66,6 +67,13 @@ def _writer(ctx, coverage_df) -> None:
     c.section("1 · What should this article be about?",
               "Write the topic the way a person would search for it — that's what the "
               "research step goes looking for.")
+
+    # Filled in by the Overview, the Opportunity Finder or the keyword engine.
+    # Popped before the boxes are drawn, so it shows once and doesn't stick.
+    handed_over = st.session_state.pop("content_source", "")
+    if handed_over:
+        st.success(f"Filled in from {handed_over}. Edit anything below before you run it.",
+                   icon="💡")
 
     topic = st.text_input(
         "Topic", key="content_topic",
@@ -237,13 +245,8 @@ def _review(site, run: dict) -> None:
               "filed as the draft.")
 
     rows = agent.check(draft, run["research"], site)
-    for row in rows:
-        cols = st.columns([2, 1, 5])
-        cols[0].markdown(f"**{row['name']}**")
-        with cols[1]:
-            c.show_badge(row["state"],
-                         {"ok": "pass", "warn": "check", "bad": "fix this"}[row["state"]])
-        cols[2].caption(row["detail"])
+    c.status_rows([{**row, "label": CHECK_LABEL[row["state"]]} for row in rows],
+                  widths=(2, 1, 5))
 
     st.write("")
     body_tab, meta_tab, faq_tab = st.tabs(["📄 Article", "🏷️ Meta + tags", "❓ FAQ + sources"])
@@ -441,12 +444,7 @@ def _quality_path() -> None:
 
 def _readiness(site: config.Site) -> None:
     c.section("Readiness for this site", "What the content path has, and what it's missing.")
-    for row in _readiness_rows(site):
-        cols = st.columns([2, 1, 4])
-        cols[0].markdown(f"**{row['name']}**")
-        with cols[1]:
-            c.show_badge(row["state"], row["label"])
-        cols[2].caption(row["detail"])
+    c.status_rows(_readiness_rows(site))
     c.nav_button("Open Settings", "Settings", key="content_settings")
 
 

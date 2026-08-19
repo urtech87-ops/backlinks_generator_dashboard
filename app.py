@@ -70,6 +70,19 @@ if st.sidebar.button("🔄 Refresh live data", disabled=not creds, width="stretc
 if d.has_live(site):
     st.sidebar.caption("Showing live coverage for this site.")
 
+st.sidebar.divider()
+with st.sidebar.expander("🛡️ What this app will never do"):
+    st.markdown(
+        "- **WordPress posts are always drafts.** Nothing here can publish a live post.\n"
+        "- **Auto-publishing only ever goes to platforms you own** — your dev.to, your "
+        "Blogger, your WordPress.\n"
+        "- **Guest posts wait for you.** The agent prospects, scores and drafts; you "
+        "approve every send, and the host decides whether to publish.\n"
+        "- **No invented numbers.** A figure with nothing measuring it is labelled "
+        "*unvalidated* rather than filled in.\n"
+        "- **Your keys stay here.** Everything saves to the local `.env`."
+    )
+
 
 # ── Page ───────────────────────────────────────────────────────────────────
 ctx = views.Ctx(site=site, start=start_d.isoformat(), end=end_d.isoformat(), creds=creds)

@@ -109,7 +109,7 @@ def _reason(bucket: str, impressions: int, position: float, has_metrics: bool) -
 
 
 def rank_targets(site, coverage_df, start: str = "", end: str = "",
-                 limit: int = 25) -> tuple:
+                 limit: int = 25, metrics: dict = None) -> tuple:
     """
     Rank this site's link-eligible pages. Returns (targets, source) where source
     is "live" when Search Console performance figures were used and
@@ -117,7 +117,9 @@ def rank_targets(site, coverage_df, start: str = "", end: str = "",
     numbers — see CLAUDE.md).
 
     `coverage_df` is the shared frame from `ui.data.coverage_frame`, so the agent
-    never has to re-inspect URLs.
+    never has to re-inspect URLs. `metrics` is {url: Search Analytics row} — pass
+    it when the caller has already fetched performance (the Analysis agent does)
+    so one report isn't queried twice; leave it out and this fetches its own.
     """
     if coverage_df is None or coverage_df.empty:
         return [], "coverage-only"
@@ -127,13 +129,14 @@ def rank_targets(site, coverage_df, start: str = "", end: str = "",
         return [], "coverage-only"
 
     # Performance figures, keyed by URL. Empty without credentials — that's fine.
-    metrics = {}
-    if start and end and config.credentials_available():
-        for row in gsc.search_analytics(site.gsc_property, start, end, ["page"],
-                                        row_limit=500):
-            url = (row.get("page") or "").rstrip("/")
-            if url:
-                metrics[url] = row
+    if metrics is None:
+        metrics = {}
+        if start and end and config.credentials_available():
+            for row in gsc.search_analytics(site.gsc_property, start, end, ["page"],
+                                            row_limit=500):
+                url = (row.get("page") or "").rstrip("/")
+                if url:
+                    metrics[url] = row
     source = "live" if metrics else "coverage-only"
 
     targets = []

@@ -24,6 +24,8 @@ BUCKET_COLOR = {
     OTHER: "#8b8d98",          # grey — usually leave alone
     HEALTHY: "#30a46c",        # green — done, link-eligible
 }
+EVERYTHING = "Everything that needs doing"
+
 BUCKET_ONELINER = {
     PLUMBING: "Broken URL — Google can't index it. Fix the redirect/404. No backlink helps.",
     CONTENT: "Crawled and rejected on quality. Rewrite required.",
@@ -75,15 +77,44 @@ def _fix_plan(site: config.Site, df: pd.DataFrame) -> None:
         return
 
     summary = d.health_summary(df)
-    cols = st.columns(5)
-    for col, bucket in zip(cols, BUCKET_ORDER):
-        col.metric(bucket, summary["counts"].get(bucket, 0))
+    c.metric_row([(bucket, summary["counts"].get(bucket, 0), BUCKET_ONELINER[bucket])
+                  for bucket in BUCKET_ORDER])
     st.caption(f"{summary['problems']} pages need attention · {summary['healthy']} healthy · "
                "work top-to-bottom: red → orange → yellow.")
 
+    # The Overview page hands a bucket (and sometimes one page) over to here.
+    focus = st.session_state.pop("analysis_focus", "")
+    st.write("")
+    choice = st.selectbox(
+        "Show", options=[EVERYTHING] + BUCKET_ORDER, key="analysis_bucket",
+        help="Filter the plan to one kind of problem. The Overview page sets this "
+             "when you open a step from there.",
+    )
+    if choice != EVERYTHING:
+        st.caption(BUCKET_ONELINER[choice])
+
+    if focus:
+        row = df[df["URL"] == focus]
+        if row.empty:
+            st.info(f"`{focus}` was sent over from the Overview, but it isn't in this "
+                    "site's coverage data any more. Press **Refresh live data** in the "
+                    "sidebar.")
+        else:
+            row = row.iloc[0]
+            with st.container(border=True):
+                st.markdown(f"**Sent over from the Overview — {row['Page']}**")
+                st.caption(row["URL"])
+                st.caption(f"Search Console says: **{row['Coverage']}**"
+                           + (f" · flags: {row['Flags']}" if row["Flags"] else ""))
+                st.write(row["Action"])
+                st.caption("This one is fixed on your site — a redirect, a template link "
+                           "or a deletion. The dashboard can't do it for you, which is "
+                           "why there's no button here.")
+
     st.divider()
 
-    for bucket in BUCKET_ORDER:
+    shown = BUCKET_ORDER if choice == EVERYTHING else [choice]
+    for bucket in shown:
         sub = df[df["Bucket"] == bucket]
         if sub.empty:
             continue
@@ -98,6 +129,7 @@ def _fix_plan(site: config.Site, df: pd.DataFrame) -> None:
             sub.sort_values("Page")[["Page", "Coverage", "Flags", "Action"]],
             width="stretch", hide_index=True,
         )
+        _bucket_actions(bucket)
 
     dups = seed.SUSPECTED_DUPLICATES if site.key == "toolsvenue" else []
     if dups:
@@ -115,6 +147,29 @@ def _fix_plan(site: config.Site, df: pd.DataFrame) -> None:
         mime="text/csv",
         help="Every page with its coverage state, bucket and recommended action.",
     )
+
+
+def _bucket_actions(bucket: str) -> None:
+    """
+    The two buckets that are acted on elsewhere in the dashboard get the button
+    that does it, so the plan is never a dead end.
+    """
+    if bucket == CONTENT:
+        cols = st.columns([2, 4])
+        with cols[0]:
+            c.nav_button("✍️ Rewrite these", "Content", key=f"an_act_{bucket}",
+                         help="Opens the Content page. Pick the page to rewrite from "
+                              "the Overview if you want it filled in for you.")
+        cols[1].caption("A rewrite is the only thing that changes a quality verdict — "
+                        "no link overrides it.")
+    elif bucket == CRAWL_BUDGET:
+        cols = st.columns([2, 4])
+        with cols[0]:
+            c.nav_button("🔗 Get these linked", "Backlinks", key=f"an_act_{bucket}",
+                         help="Opens the Backlinks page, where these pages are the "
+                              "rescue targets.")
+        cols[1].caption("Internal links first, then one or two genuine backlinks. This "
+                        "is the one bucket where link-building changes indexing.")
 
 
 # ── Indexing ───────────────────────────────────────────────────────────────
