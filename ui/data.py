@@ -10,8 +10,9 @@ whatever is already loaded, or falls back to the seed snapshot.
 import pandas as pd
 import streamlit as st
 
+from agents import analysis
 from core import config, gsc, seed
-from core.classifier import recommend, HEALTHY
+from core.classifier import recommend
 
 
 def _state_key(site: config.Site) -> str:
@@ -81,13 +82,8 @@ def coverage_frame(site: config.Site) -> tuple[pd.DataFrame, str]:
 
 
 def health_summary(df: pd.DataFrame) -> dict:
-    """Headline indexing numbers used by Overview and Analysis."""
-    total = len(df)
-    healthy = int((df["Bucket"] == HEALTHY).sum()) if total else 0
-    return {
-        "total": total,
-        "healthy": healthy,
-        "problems": total - healthy,
-        "pct": round(healthy / total * 100) if total else 0,
-        "counts": df["Bucket"].value_counts().to_dict() if total else {},
-    }
+    """
+    Headline indexing numbers used by Overview and Analysis. The Analysis agent
+    owns the sums, so the two pages can never quote different figures.
+    """
+    return analysis.health(df)

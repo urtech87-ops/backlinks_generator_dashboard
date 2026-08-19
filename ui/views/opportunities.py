@@ -244,19 +244,22 @@ def _to_content(item) -> None:
         "content_topic": item.topic,
         "content_keyword": item.keyword,
         "content_notes": direction,
+        "content_source": f"the Opportunity Finder — {item.kind.lower()}",
         "nav": "Content",
     })
 
 
 def _to_backlinks(url: str) -> None:
     """Preselect this page as the Backlinks target and jump there."""
-    st.session_state.update({"bl_focus_url": url, "nav": "Backlinks"})
+    st.session_state.update({"bl_focus_url": url, "bl_focus_from": "the Opportunities page",
+                             "nav": "Backlinks"})
 
 
 def _to_content_keyword(keyword: str, topic: str = "") -> None:
     st.session_state.update({
         "content_keyword": keyword,
         "content_topic": topic or st.session_state.get("content_topic", "") or keyword,
+        "content_source": "the keyword engine",
         "nav": "Content",
     })
 
@@ -488,9 +491,4 @@ def _readiness(ctx) -> None:
                    "below for a one-off scan."),
     })
 
-    for row in rows:
-        cols = st.columns([2, 1, 4])
-        cols[0].markdown(f"**{row['name']}**")
-        with cols[1]:
-            c.show_badge(row["state"], row["label"])
-        cols[2].caption(row["detail"])
+    c.status_rows(rows)

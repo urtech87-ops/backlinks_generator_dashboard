@@ -112,20 +112,20 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
                    "eligible list rather than a performance ranking — the ordering is "
                    "unvalidated.")
 
-    # The Opportunity Finder and the keyword engine both hand pages over to this
-    # picker. Setting the widget's key before it's drawn preselects it.
+    # The Overview, the Opportunity Finder and the keyword engine all hand pages
+    # over to this picker. Setting the widget's key before it's drawn preselects it.
     focus = st.session_state.pop("bl_focus_url", "")
+    came_from = st.session_state.pop("bl_focus_from", "another page")
     if focus:
         match = next((i for i, t in enumerate(targets)
                       if t.url.rstrip("/") == focus.rstrip("/")), None)
         if match is None:
-            st.info(f"`{focus}` was sent over from another page, but it isn't link-eligible "
-                    "— only indexed and discovered-but-uncrawled pages are offered here. "
-                    "The Fix Plan is where that page belongs first.")
+            st.info(f"`{focus}` was sent over from {came_from}, but it isn't "
+                    "link-eligible — only indexed and discovered-but-uncrawled pages are "
+                    "offered here. The Fix Plan is where that page belongs first.")
         else:
             st.session_state["bl_target_pick"] = match
-            st.success(f"Preselected `{focus}`, sent over from the Opportunities page.",
-                       icon="💡")
+            st.success(f"Preselected `{focus}`, sent over from {came_from}.", icon="💡")
 
     choice = st.selectbox(
         "Target page", options=list(range(len(targets))),
@@ -342,15 +342,17 @@ def _platform_readiness(site) -> None:
     """One row per owned platform, naming the exact settings still missing."""
     c.section("Platform readiness", "Auto-publishing is only ever allowed on platforms "
                                     "you own.")
-    for key, platform in PLATFORMS.items():
+    rows = []
+    for platform in PLATFORMS.values():
         gaps = platform.missing(site)
-        cols = st.columns([2, 1, 4])
-        cols[0].markdown(f"**{platform.label}**")
-        with cols[1]:
-            c.show_badge("ok" if not gaps else "idle",
-                         "ready" if not gaps else "not set")
-        cols[2].caption(platform.blurb if not gaps
-                        else f"{platform.blurb} Still needed: {', '.join(gaps)}.")
+        rows.append({
+            "name": platform.label,
+            "state": "ok" if not gaps else "idle",
+            "label": "ready" if not gaps else "not set",
+            "detail": (platform.blurb if not gaps
+                       else f"{platform.blurb} Still needed: {', '.join(gaps)}."),
+        })
+    c.status_rows(rows)
 
     cols = st.columns([2, 4])
     with cols[0]:
@@ -473,12 +475,9 @@ def _outreach_readiness() -> None:
          else "Optional. Without it you copy the pitch and send it yourself — which is "
               "what most people should do anyway."),
     ]
-    for label, ok, blurb in rows:
-        cols = st.columns([2, 1, 4])
-        cols[0].markdown(f"**{label}**")
-        with cols[1]:
-            c.show_badge("ok" if ok else "idle", "ready" if ok else "not set")
-        cols[2].caption(blurb)
+    c.status_rows([{"name": label, "state": "ok" if ok else "idle",
+                    "label": "ready" if ok else "not set", "detail": blurb}
+                   for label, ok, blurb in rows])
     c.nav_button("Open Settings", "Settings", key="gb_settings")
 
 

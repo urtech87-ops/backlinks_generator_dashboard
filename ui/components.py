@@ -75,20 +75,21 @@ def empty_state(title: str, body: str, steps: list | None = None,
                 st.markdown(f"{i}. {step}")
 
 
-def coming_soon(title: str, phase: str, body: str, will_do: list,
-                icon: str = "🚧") -> None:
+def status_rows(rows: list, widths=(2, 1, 4)) -> None:
     """
-    A page that's on the roadmap but not built yet. Says plainly what it will
-    do and which phase builds it — no fake buttons, no dead ends.
+    The house readiness strip, used on every page: one line per moving part,
+    with a coloured badge and a plain-language explanation of what it means.
+
+    `rows` = [{'name', 'state', 'label', 'detail'}, ...] where state is one of
+    ok / warn / bad / idle. Every page draws these the same way, so "ready" and
+    "not set" mean the same thing wherever you see them.
     """
-    with st.container(border=True):
-        st.markdown(f"### {icon} {title}")
-        show_badge("idle", f"Built in {phase}")
-        st.write("")
-        st.write(body)
-        st.markdown("**What it will do:**")
-        for item in will_do:
-            st.markdown(f"- {item}")
+    for row in rows:
+        cols = st.columns(list(widths))
+        cols[0].markdown(f"**{row['name']}**")
+        with cols[1]:
+            show_badge(row.get("state", "idle"), row.get("label", ""))
+        cols[2].caption(row.get("detail", ""))
 
 
 def check_list(checks: list) -> None:
