@@ -11,3 +11,4 @@ data/*.csv
 .agents/skills/
 # Articles this dashboard writes are your content, not the app.
 outputs/
+config/service_account.json
