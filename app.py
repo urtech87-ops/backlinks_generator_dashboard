@@ -17,10 +17,17 @@ import datetime as dt
 import streamlit as st
 
 from core import config
+from ui import components as c
 from ui import views
 from ui import data as d
 
 st.set_page_config(page_title="SEO Command Center", page_icon="🧭", layout="wide")
+
+# Overview is the landing page and the spine of the tool: everything else is
+# reached from a button on one of its rows. Setting it explicitly (rather than
+# relying on the radio's first option) means a deep link or a stale session
+# still opens where the work starts.
+st.session_state.setdefault("nav", "Overview")
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -53,13 +60,20 @@ else:
     start_d, end_d = default_start, today
 
 creds = config.credentials_available()
+ga4_ready = config.ga4_ready(site)
 
 st.sidebar.divider()
 if creds:
-    st.sidebar.markdown("**Live data:** 🟢 credentials found")
+    st.sidebar.markdown("**Live data:** 🟢 Google key file found")
+    st.sidebar.caption("Search Console can be read. Settings → Test connections confirms "
+                       "it can see this exact property."
+                       if ga4_ready else
+                       f"Search Console can be read. {site.label} has no GA4 property ID "
+                       "yet, so the Audience view stays empty.")
 else:
-    st.sidebar.markdown("**Live data:** 🟡 seed mode")
-    st.sidebar.caption("No Google key file yet — indexing views use your 16 Aug snapshot.")
+    st.sidebar.markdown("**Live data:** 🟡 SAMPLE mode")
+    st.sidebar.caption("No Google key file yet, so every number in the dashboard comes "
+                       "from a saved 16 Aug snapshot — not from Google today.")
 
 if st.sidebar.button("🔄 Refresh live data", disabled=not creds, width="stretch",
                      help="Re-checks every URL in your sitemap with the Search Console "
@@ -68,7 +82,11 @@ if st.sidebar.button("🔄 Refresh live data", disabled=not creds, width="stretc
     (st.sidebar.success if count else st.sidebar.error)(message)
 
 if d.has_live(site):
-    st.sidebar.caption("Showing live coverage for this site.")
+    st.sidebar.caption("🟢 Showing live coverage for this site — the sample snapshot has "
+                       "been replaced.")
+elif creds:
+    st.sidebar.caption("Still showing the sample snapshot. Press the button above to "
+                       "replace it with what Google reports today.")
 
 st.sidebar.divider()
 with st.sidebar.expander("🛡️ What this app will never do"):
@@ -85,5 +103,16 @@ with st.sidebar.expander("🛡️ What this app will never do"):
 
 
 # ── Page ───────────────────────────────────────────────────────────────────
-ctx = views.Ctx(site=site, start=start_d.isoformat(), end=end_d.isoformat(), creds=creds)
+ctx = views.Ctx(site=site, start=start_d.isoformat(), end=end_d.isoformat(), creds=creds,
+                ga4=ga4_ready)
+
+# Said once, at the top of whichever page you're on: these numbers are samples,
+# and here is the one button that changes that. Settings is exempt — that page
+# *is* the fix, and repeating the banner on it would just be in the way. The
+# GA4-only variant is limited to the two pages that actually show GA4 data,
+# so a missing property ID doesn't nag you on the Backlinks page.
+if page != "Settings":
+    c.connect_banner(creds, ga4_ready or page not in ("Overview", "Analysis"),
+                     site.label)
+
 views.PAGES[page][1](ctx)

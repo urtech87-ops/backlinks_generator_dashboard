@@ -9,4 +9,5 @@ that picks a page and hands it the current site + date range.
 from .components import (            # noqa: F401  (re-exported for convenience)
     page_header, section, status_badge, show_badge, metric_row,
     empty_state, status_rows, check_list, nav_button, data_source_note,
+    connect_banner, onboarding_strip, jargon_note, JARGON,
 )

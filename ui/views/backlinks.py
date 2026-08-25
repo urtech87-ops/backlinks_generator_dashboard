@@ -21,7 +21,7 @@ import streamlit as st
 from agents import backlink as bl
 from agents import outreach as out
 from core import config, keywords as kw, mailer, search, tracker
-from core.classifier import HEALTHY, CRAWL_BUDGET
+from core.classifier import HEALTHY, CRAWL_BUDGET, PLUMBING, CONTENT
 from publishers import PLATFORMS, blogger
 from publishers.base import Article
 from ui import components as c
@@ -50,10 +50,14 @@ def render(ctx) -> None:
          "Indexed pages. Links to these compound."),
         ("Pages links can rescue", crawl,
          "Discovered but never crawled — the one bucket where a backlink helps."),
-        ("Not worth linking to yet", counts.get("Plumbing", 0) + counts.get("Content", 0),
-         "Broken or quality-rejected. A link here is wasted."),
+        ("Not worth linking to yet", counts.get(PLUMBING, 0) + counts.get(CONTENT, 0),
+         "Broken, or refused by Google on quality. A link to these is wasted effort."),
     ])
     c.data_source_note(source)
+    st.caption("**Lane A** publishes to accounts you own, automatically. **Lane B** "
+               "drafts guest pitches that wait for you to send them. Both start by "
+               "picking the page of yours the link should point at.")
+    c.jargon_note("Backlink", "Indexed", "Crawl budget", "Striking distance")
 
     if linkable == 0 and crawl == 0:
         st.warning("No pages worth linking to yet. Clear the red and orange buckets on "
@@ -141,10 +145,15 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
         st.caption(target.reason)
         if target.has_metrics:
             c.metric_row([
-                ("Clicks", target.clicks),
-                ("Impressions", f"{target.impressions:,}"),
-                ("Avg position", target.position or "—"),
-                ("Opportunity score", target.score),
+                ("Clicks", target.clicks, "Visits Google sent this page in the "
+                                          "sidebar's date range."),
+                ("Impressions", f"{target.impressions:,}",
+                 "Times this page appeared in results."),
+                ("Average position", target.position or "—",
+                 "1 is the top of page one. 5-20 is where a link pays back most."),
+                ("Opportunity score", target.score,
+                 "This dashboard's own ranking of where a link does most good — "
+                 "impressions plus headroom. Not a Google figure."),
             ])
         _target_keywords(ctx, target)
 
@@ -153,7 +162,9 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
             pd.DataFrame([{
                 "Page": t.page, "Opportunity": t.opportunity, "Bucket": t.bucket,
                 "Clicks": t.clicks, "Impressions": t.impressions,
-                "Avg position": t.position or "", "Score": t.score, "Why": t.reason,
+                # None, not "" — a blank string in a numeric column makes pandas
+                # fall back to object dtype and Arrow then can't serialise it.
+                "Avg position": t.position or None, "Score": t.score, "Why": t.reason,
             } for t in targets],),
             width="stretch", hide_index=True,
         )
@@ -186,6 +197,8 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
         key="bl_notes", placeholder="e.g. focus on the CSV export use-case",
         help="Free text passed to the model — an angle, a use-case, an audience detail.",
     )
+    st.caption("Leave it blank and the writer works from the target page's own title "
+               "and description.")
 
     st.divider()
 

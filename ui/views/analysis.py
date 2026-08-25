@@ -44,6 +44,10 @@ def render(ctx) -> None:
 
     df, source = d.coverage_frame(site)
     c.data_source_note(source)
+    st.caption("**Fix Plan** = what's broken and how to mend it · **Indexing** = how much "
+               "of the site Google has accepted · **Performance** = what you earn in "
+               "search · **Audience** = who actually turns up.")
+    c.jargon_note("Indexed", "Crawl budget", "Impressions", "Average position")
 
     tab_fix, tab_index, tab_perf, tab_aud = st.tabs(
         ["🔧 Fix Plan", "📄 Indexing", "📈 Performance", "👥 Audience"]
@@ -126,8 +130,18 @@ def _fix_plan(site: config.Site, df: pd.DataFrame) -> None:
         )
         st.caption(BUCKET_ONELINER[bucket])
         st.dataframe(
-            sub.sort_values("Page")[["Page", "Coverage", "Flags", "Action"]],
+            sub.sort_values("Page")[["Page", "Coverage", "Flags", "Action"]].rename(
+                columns={"Coverage": "What Google says",
+                         "Flags": "Warning signs",
+                         "Action": "What to do about it"}),
             width="stretch", hide_index=True,
+            column_config={
+                "Page": st.column_config.TextColumn(
+                    "Page", help="The path on your site, with the domain trimmed off."),
+                "What Google says": st.column_config.TextColumn(
+                    "What Google says",
+                    help="The exact coverage state Search Console reports for this URL."),
+            },
         )
         _bucket_actions(bucket)
 
@@ -187,20 +201,27 @@ def _indexing(df: pd.DataFrame, source: str) -> None:
     ])
     st.progress(summary["healthy"] / summary["total"] if summary["total"] else 0)
 
-    c.section("Coverage breakdown", "The raw states Search Console reports, counted up.")
+    c.section("Coverage breakdown",
+              "The exact verdicts Search Console reports, counted up. A tall bar on "
+              "anything other than “Submitted and indexed” is where your traffic is "
+              "going missing.")
     cov = (df["Coverage"].value_counts().rename_axis("Coverage state")
            .reset_index(name="Pages"))
     st.bar_chart(cov.set_index("Coverage state"))
 
-    c.section("Every page + its coverage state")
+    c.section("Every page and what Google decided about it",
+              "Sorted by problem type, so pages with the same cause sit together — they "
+              "usually share one fix.")
     st.dataframe(
-        df[["Page", "Coverage", "Bucket", "Flags"]].sort_values(["Bucket", "Page"]),
+        df[["Page", "Coverage", "Bucket", "Flags"]].sort_values(["Bucket", "Page"]).rename(
+            columns={"Coverage": "What Google says", "Bucket": "Problem type",
+                     "Flags": "Warning signs"}),
         width="stretch", hide_index=True,
     )
     if source == "seed":
-        st.info("This is your 16 Aug snapshot. Connect Search Console and press "
-                "**Refresh live data** to see whether your fixes have flipped pages "
-                "to indexed.")
+        st.info("This is the sample 16 Aug snapshot, not today's figures. Connect Search "
+                "Console and press **Refresh live data** in the sidebar to see whether "
+                "your fixes have flipped pages to indexed.", icon="🟡")
 
 
 # ── Performance (GSC Search Analytics) ─────────────────────────────────────
@@ -233,24 +254,53 @@ def _performance(ctx) -> None:
     if pages:
         pdf = pd.DataFrame(pages)
         c.metric_row([
-            ("Total clicks", int(pdf["clicks"].sum())),
-            ("Total impressions", int(pdf["impressions"].sum())),
-            ("Pages with impressions", len(pdf)),
+            ("Total clicks", int(pdf["clicks"].sum()),
+             "Visits Google sent you in this date range."),
+            ("Total impressions", int(pdf["impressions"].sum()),
+             "Times one of your pages appeared in results — appearing isn't being clicked."),
+            ("Pages earning impressions", len(pdf),
+             "How many of your pages Google showed to anyone at all."),
         ])
-        c.section("Top pages", "Sorted by impressions — high impressions with a weak "
-                               "position is where a small push pays off most.")
-        st.dataframe(pdf.sort_values("impressions", ascending=False),
-                     width="stretch", hide_index=True)
+        c.section("Which pages earn the most",
+                  "Sorted by impressions. Lots of impressions at a weak average position "
+                  "is the best-value row on this table — the demand is already there, "
+                  "the page just isn't high enough yet.")
+        st.dataframe(_perf_frame(pdf), width="stretch", hide_index=True)
+        cols = st.columns([2, 4])
+        with cols[0]:
+            c.nav_button("🏠 Act on these", "Overview", key="an_perf_overview",
+                         type="primary",
+                         help="The Overview shows this same ranking with a Build "
+                              "backlinks / Write article / Fix button on every row.")
+        cols[1].caption("This tab is the raw report. The buttons that act on it live on "
+                        "the Overview, so one page owns the actions.")
     if queries:
-        c.section("Top queries", "What people actually typed. Real keyword data, "
-                                 "no guessing.")
-        st.dataframe(pd.DataFrame(queries).sort_values("impressions", ascending=False),
-                     width="stretch", hide_index=True)
+        c.section("Which searches you appear for",
+                  "What people actually typed to see you. Real first-party data — no "
+                  "estimated volumes anywhere in this dashboard.")
+        st.dataframe(_perf_frame(pd.DataFrame(queries)), width="stretch", hide_index=True)
+        cols = st.columns([2, 4])
+        with cols[0]:
+            c.nav_button("🔑 Find the striking-distance ones", "Opportunities",
+                         key="an_perf_kw",
+                         help="The Keywords tab flags the searches you sit 5th-20th for "
+                              "and hands them to the writer.")
+        cols[1].caption("A search you rank 5th-20th for, on real impressions, is the "
+                        "cheapest traffic you own.")
+
+
+def _perf_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """The Search Console column names, said in plain language."""
+    return frame.sort_values("impressions", ascending=False).rename(columns={
+        "page": "Page", "query": "Search", "clicks": "Clicks",
+        "impressions": "Impressions", "ctr": "Click rate %",
+        "position": "Average position",
+    })
 
 
 # ── Audience (GA4) ─────────────────────────────────────────────────────────
 def _audience(ctx) -> None:
-    if not ctx.creds or not ctx.site.ga4_property_id:
+    if not config.ga4_ready(ctx.site):
         c.empty_state(
             "Audience needs GA4",
             "This view shows how many real people arrive, where from, and what they "
@@ -273,26 +323,38 @@ def _audience(ctx) -> None:
         return
 
     c.metric_row([
-        ("Active users", f"{s['activeUsers']:,}"),
-        ("Sessions", f"{s['sessions']:,}"),
-        ("Page views", f"{s['pageViews']:,}"),
-        ("Avg session (s)", s["avgDuration"]),
-        ("Engagement", f"{s['engagementRate']}%"),
+        ("People", f"{s['activeUsers']:,}", "Distinct visitors in this date range."),
+        ("Visits", f"{s['sessions']:,}", "One person can visit more than once."),
+        ("Pages viewed", f"{s['pageViews']:,}", "Total page views across all visits."),
+        ("Time per visit", f"{s['avgDuration']}s", "Average length of a visit. Seconds."),
+        ("Engaged visits", f"{s['engagementRate']}%",
+         "Share of visits where someone stayed, scrolled or clicked rather than "
+         "bouncing straight off."),
     ])
 
     left, right = st.columns(2)
     with left:
-        c.section("Traffic by channel", "Where the visits come from.")
+        c.section("Where the visits come from",
+                  "“Organic search” is the one this dashboard is trying to grow.")
         ch = ga4.channels(ctx.site.ga4_property_id, ctx.start, ctx.end)
         if ch:
             st.dataframe(pd.DataFrame(ch), width="stretch", hide_index=True)
+        else:
+            st.caption("No channel rows for this range yet.")
     with right:
-        c.section("Top countries")
+        c.section("Which countries they're in",
+                  "Useful for deciding what a piece should assume about its reader.")
         co = ga4.countries(ctx.site.ga4_property_id, ctx.start, ctx.end)
         if co:
             st.dataframe(pd.DataFrame(co), width="stretch", hide_index=True)
+        else:
+            st.caption("No country rows for this range yet.")
 
-    c.section("Top landing pages", "The first page people see — worth keeping healthy.")
+    c.section("The pages people arrive on",
+              "The first page a visitor sees. These are the ones worth keeping indexed "
+              "and worth linking to.")
     tp = ga4.top_pages(ctx.site.ga4_property_id, ctx.start, ctx.end)
     if tp:
         st.dataframe(pd.DataFrame(tp), width="stretch", hide_index=True)
+    else:
+        st.caption("No landing-page rows for this range yet.")

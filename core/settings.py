@@ -67,7 +67,8 @@ def site_fields(prefix: str, label: str) -> list[Field]:
 # ── Global groups ─────────────────────────────────────────────────────────
 GOOGLE = Group(
     "google", "Google Search Console + Analytics",
-    "One service account serves both APIs. Without it the dashboard runs on seed data.",
+    "One service account serves both APIs, and it is the step the whole dashboard "
+    "stands on. Without it every number you see is sample data.",
     [
         Field("GOOGLE_SA_FILE", "Service-account JSON file",
               "Path to the downloaded key file, relative to the project folder. "

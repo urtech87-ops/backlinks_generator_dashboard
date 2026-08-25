@@ -2,8 +2,8 @@
 One module per sidebar page. Each exposes `render(ctx)`.
 
 `Ctx` is everything the sidebar has already decided — which site you're looking
-at, the date range, and whether Google credentials exist — so pages never have
-to re-ask.
+at, the date range, whether Google credentials exist and whether this site can
+actually be read from GA4 — so pages never have to re-ask.
 """
 
 from dataclasses import dataclass
@@ -17,6 +17,7 @@ class Ctx:
     start: str          # ISO date, inclusive
     end: str            # ISO date, inclusive
     creds: bool         # Google service-account JSON present?
+    ga4: bool = False   # ...and this site has a GA4 property ID, so GA4 is readable
 
 
 from . import (overview, analysis, opportunities, content, backlinks,  # noqa: E402
