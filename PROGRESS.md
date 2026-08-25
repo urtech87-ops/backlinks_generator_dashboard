@@ -5,12 +5,14 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-19 · **Current phase:** Phase 7 done — **the build is complete**
-**Overall:** ▓▓▓▓▓▓▓▓ 100% (all seven phases shipped. Overview is now the conductor: it runs
-the Analysis agent, ranks every page by what it needs, and launches the fix / rewrite /
-link / strengthen action on the page that does it. The UI had its consistency pass and
-README describes the finished system. What's left is not building — it's running the thing
-against real keys; see **First real run** below.)
+**Last updated:** 2026-08-25 · **Current phase:** Phase 8 done — **the build is complete**
+**Overall:** ▓▓▓▓▓▓▓▓ 100% (all eight phases shipped. Phase 7 made Overview the conductor;
+Phase 8 made it the *spine*: it is the landing page, it shows your pages ranked on the
+impressions they actually earn, and every row carries the three buttons that act on it —
+Build backlinks · Write article · Fix — each pre-filling the agent that does the job. A
+disconnected dashboard now says out loud that its numbers are SAMPLE data and offers the
+one button that changes that. What's left is not building — it's running the thing against
+real keys; see **First real run** below.)
 
 ---
 
@@ -180,6 +182,40 @@ quality content; backlinks are the visible target, not the engine.
       estimate traffic". Still not run against real Google/OpenRouter credentials from
       here; this environment has none.
 
+- [x] **Phase 8 — UX + completeness pass** — an audit of the core journey (connect →
+      see what ranks → one click to links or an article) followed by the fixes it found.
+      **Overview is now the landing page and the spine:** a three-step onboarding strip
+      (connect · review · generate) that reads real state rather than a tutorial flag,
+      indexing health, then **🏆 Your pages, ranked** — every page ordered by the
+      impressions it actually earns, each row carrying **🔗 Build backlinks · ✍️ Write
+      article · 🔧 Fix**, and each button disabled with the reason printed when it would
+      be wasted (no backlink offered for a page Google can't reach). Striking-distance
+      queries got their own section with the same hand-offs. **Not-connected state:** a
+      banner at the top of every page saying the numbers are SAMPLE data, with a
+      **Connect Search Console + GA4** button that deep-links into Settings → Google APIs
+      (Settings' tabs became a radio section picker so a deep link can target one).
+      **GA4 stopped being conflated with Search Console** — `config.ga4_ready(site)` needs
+      the key file *and* a property ID, and it has its own status row everywhere.
+      **Landing no longer needs a button press:** with credentials, Overview fetches its
+      figures once on first paint and keeps them, which was the worst trap in Phase 7.
+      Plus a polish pass: a `jargon_note()` glossary on every screen that uses SEO words,
+      plain-language column names in place of Search Console's raw ones, per-metric
+      tooltips, guided empty states, and "seed" renamed to "sample" wherever a user can
+      see it.
+      *Note:* this phase ships **`tests/test_phase8_ux.py`** — 16 AppTest cases, the
+      repo's first committed tests (`pip install -r requirements-dev.txt && pytest -q`).
+      They stub `core.gsc`'s three network functions, which is still the only way to
+      exercise the live path from here: this environment has never had a Google key, and
+      inventing one would be the exact sin the app refuses to commit. What they prove:
+      Overview is the landing page, all six pages render, every non-Settings page says
+      SAMPLE and offers the connect button, the connect button lands on Google APIs,
+      **Refresh live data really does replace the sample snapshot with live coverage**,
+      live performance appears without pressing Run, GA4 is not reported as connected
+      without a property ID, every ranked row offers all three actions with the wasted
+      ones disabled, and each of the three hand-offs arrives with the right page filled
+      in. Also fixed on the way past: the Backlinks eligible-pages table put `""` in a
+      numeric column, which made Arrow fail to serialise it.
+
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
 - `core/` package: `config` (now readable *and* writable), `settings` (the option
@@ -330,12 +366,43 @@ quality content; backlinks are the visible target, not the engine.
   from the Overview" callout for one page (`analysis_focus`), and per-bucket hand-off
   buttons; the sidebar gained a plain list of what the app will never do.
 
+- **Phase 8 · `ui/components.py` gained the three pieces every page now leans on.**
+  `connect_banner()` (the SAMPLE-data banner + the one button that fixes it, drawn once
+  in `app.py` for every page except Settings), `onboarding_strip()` (the three-step
+  spine, states read from real config rather than stored progress), and `jargon_note()`
+  with a shared `JARGON` dictionary — so "impressions", "striking distance" and
+  "crawl budget" are explained the same way wherever they appear.
+- **Phase 8 · `agents/analysis.PageStat` + `ranked_pages()`** — one page as it actually
+  performs, and the ranking Overview draws. With Search Console it sorts on real
+  impressions; without it, it returns the link-eligible pages in coverage order with
+  every row flagged `has_metrics = False`, because there is nothing to rank on and a
+  zero would read like a measurement. Each stat knows which actions make sense
+  (`can_link`, `needs_fix`, `topic`) and carries the reason when one doesn't, plus the
+  striking-distance query its own page ranks for — which is what makes "Write article"
+  hand the writer a real search instead of a slug.
+- **Phase 8 · `config.ga4_ready(site)`** — GA4 is connected only when the key file *and*
+  a property ID exist. Overview, the sidebar, the banner and Settings all read it, so no
+  screen can claim GA4 is connected for a site that has no property ID.
+- **Phase 8 · Settings is deep-linkable.** Its tabs became a `st.radio` section picker
+  bound to `settings_section`, so any page can send you to the exact section that fixes
+  the gap: the banner's button targets 🔑 Google APIs, and the GA4 row targets 🌐 Sites.
+  The Google section gained a four-step "how to get the file" guide and a per-site
+  readability strip.
+- **Phase 8 · Overview auto-loads once.** `_report()` fetches live figures on first
+  paint when credentials exist and keeps the result for that site + date range +
+  coverage source, so landing on a connected dashboard shows what's ranking instead of
+  an empty panel telling you to press a button. Pressing **Re-run the analysis** or
+  refreshing coverage invalidates it.
+- **Phase 8 · the repo has tests.** `tests/test_phase8_ux.py`, 16 AppTest cases, run
+  with `pip install -r requirements-dev.txt && pytest -q`.
+
 ## Next up (start here)
-**The build is done — every phase is ticked.** There is no Phase 8. What the project needs
-now is its first real run: this environment has never had a Google key, an OpenRouter key
-or a platform key, so every path has been verified against stubs and none against a live
+**The build is done — every phase through 8 is ticked.** What the project needs now is its
+first real run: this environment has never had a Google key, an OpenRouter key or a
+platform key, so every path has been verified against stubs and none against a live
 account. Work the list below in order; each item is the first time a piece of this touches
-reality.
+reality. Phase 8 removed the last excuse for not starting — connect Google and the Overview
+fills in by itself.
 
 **First real run (in this order):**
 - Connect Google: **Settings → Google APIs**, then **Test connections**, then **Refresh
@@ -363,7 +430,11 @@ The hand-off plumbing between pages is `st.session_state`: `content_topic` /
 `content_keyword` / `content_notes` / `content_source` for the writer, `bl_focus_url` /
 `bl_focus_from` for Lane A's target picker, `analysis_bucket` / `analysis_focus` for the
 Fix Plan, and `nav` to change page. `agents/analysis.py` is what decides *which* of those a
-page gets, and `ui/components.py` is what every page draws with.
+page gets, and `ui/components.py` is what every page draws with. Phase 8 added two more
+hand-off facts worth knowing: `settings_section` deep-links into one Settings section, and
+`agents/analysis.ranked_pages()` produces the `PageStat` rows the Overview's winners table
+and its three buttons are built from. Run `pytest -q` before and after touching any of it —
+`tests/test_phase8_ux.py` drives the whole journey through Streamlit's AppTest.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Run **Settings → Test connections** with the real service-account file, so live GSC

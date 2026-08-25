@@ -93,6 +93,100 @@ class Recommendation:
 
 
 @dataclass
+class PageStat:
+    """
+    One page of yours as it actually performs — the row the Overview's winners
+    table draws, and the row every one-click action is launched from.
+
+    Everything here is measured or blank. `has_metrics` False means Search
+    Console had nothing for this page in this range, and the row says so rather
+    than showing a zero that looks like a reading.
+    """
+    url: str
+    page: str                       # path only, for display
+    bucket: str = ""
+    coverage: str = ""
+    clicks: int = 0
+    impressions: int = 0
+    position: float = 0.0
+    ctr: float = 0.0
+    has_metrics: bool = False
+    keyword: str = ""               # the striking-distance query this page ranks for
+    keyword_position: float = 0.0
+    keyword_impressions: int = 0
+
+    @property
+    def indexed(self) -> bool:
+        return self.bucket == HEALTHY
+
+    @property
+    def can_link(self) -> bool:
+        """Backlinks are only ever offered for pages where a link isn't wasted."""
+        return self.bucket in (HEALTHY, CRAWL_BUDGET)
+
+    @property
+    def link_note(self) -> str:
+        if self.bucket == HEALTHY:
+            return "Indexed, so links to this page compound."
+        if self.bucket == CRAWL_BUDGET:
+            return ("Discovered but never crawled — the one case where a backlink "
+                    "actually changes indexing.")
+        if self.bucket == PLUMBING:
+            return ("Google can't reach this page at all, so a link to it earns "
+                    "nothing. Fix the URL first.")
+        if self.bucket == CONTENT:
+            return ("Google crawled this and refused it on quality. No link overrides "
+                    "that — it needs rewriting first.")
+        return "Not a link target: this page isn't one Google will rank."
+
+    @property
+    def needs_fix(self) -> bool:
+        return self.bucket in (PLUMBING, CONTENT)
+
+    @property
+    def status_state(self) -> str:
+        return {HEALTHY: "ok", CRAWL_BUDGET: "warn",
+                PLUMBING: "bad", CONTENT: "bad"}.get(self.bucket, "idle")
+
+    @property
+    def status_label(self) -> str:
+        return {HEALTHY: "indexed", CRAWL_BUDGET: "not crawled yet",
+                PLUMBING: "broken URL", CONTENT: "refused on quality"}.get(
+                    self.bucket, self.bucket.lower() or "unknown")
+
+    @property
+    def metrics_line(self) -> str:
+        if not self.has_metrics:
+            return "No Search Console figures for this page in this date range."
+        pos = f" · average position {self.position}" if self.position else ""
+        return (f"{self.impressions:,} impressions · {self.clicks:,} clicks{pos} "
+                "in this date range.")
+
+    @property
+    def topic(self) -> str:
+        """What the writer would be asked to write about. "" = not an article."""
+        return self.keyword or topic_from_url(self.url)
+
+    @property
+    def write_note(self) -> str:
+        """The direction handed to the writer, matched to what this page is."""
+        if self.bucket == CONTENT:
+            return (f"This rewrites an existing page: {self.url}. Google crawled it and "
+                    "refused to index it on quality, so it needs real use-cases, one "
+                    "worked example and an FAQ — not more of the same.")
+        if self.keyword:
+            return (f"Strengthen {self.url} for the query \u201c{self.keyword}\u201d, which "
+                    f"already earns {self.keyword_impressions:,} impressions at position "
+                    f"{self.keyword_position}.")
+        if self.has_metrics and self.impressions:
+            return (f"A supporting article for {self.url}, which already earns "
+                    f"{self.impressions:,} impressions"
+                    + (f" at position {self.position}" if self.position else "")
+                    + ". Link to it from the new piece.")
+        return f"A supporting article that links to {self.url}."
+
+
+@dataclass
 class Step:
     """One line of the ordered 'what to do next' list."""
     icon: str
@@ -113,6 +207,7 @@ class Report:
     steps: list = field(default_factory=list)
     recommendations: list = field(default_factory=list)
     keywords: list = field(default_factory=list)
+    pages: list = field(default_factory=list)      # PageStat, best-performing first
     performance: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
     source: str = "coverage-only"   # live | coverage-only
@@ -191,6 +286,73 @@ def _performance_summary(metrics: dict, keywords: list) -> dict:
 
 def _row_metrics(metrics: dict, url: str) -> dict:
     return metrics.get(url.rstrip("/"), {})
+
+
+# ── The winners table — which of your pages actually earn something ────────
+MAX_PAGES = 12          # how many rows the Overview's winners table draws
+
+
+def _keyword_for_page(url: str, keywords: list):
+    """
+    The best striking-distance query this exact page ranks for, or None. It's
+    what turns "this page does well" into "this page is one push from page one
+    on *this* search", which is what the writer needs to be handed.
+    """
+    target = url.rstrip("/")
+    best = None
+    for keyword in kw.striking_distance(keywords or []):
+        if (keyword.page or "").rstrip("/") != target:
+            continue
+        if best is None or keyword.impressions > best.impressions:
+            best = keyword
+    return best
+
+
+def ranked_pages(coverage_df, metrics: dict, keywords: list = None,
+                 limit: int = MAX_PAGES) -> list:
+    """
+    Your pages, best-performing first — the list the Overview is built around.
+
+    With Search Console figures this is a real ranking on impressions. Without
+    them there is nothing to rank on, so it returns the pages Google has
+    accepted or discovered, in coverage order, every row flagged `has_metrics
+    = False`. It never fills a blank with a zero that reads like a measurement.
+    """
+    if coverage_df is None or coverage_df.empty:
+        return []
+
+    rows = []
+    for _, row in coverage_df.iterrows():
+        m = _row_metrics(metrics, row["URL"])
+        stat = PageStat(
+            url=row["URL"], page=row["Page"], bucket=row["Bucket"],
+            coverage=row["Coverage"],
+            clicks=int(m.get("clicks", 0) or 0),
+            impressions=int(m.get("impressions", 0) or 0),
+            position=float(m.get("position", 0) or 0),
+            ctr=float(m.get("ctr", 0) or 0),
+            has_metrics=bool(m),
+        )
+        match = _keyword_for_page(stat.url, keywords)
+        if match:
+            stat.keyword = match.keyword
+            stat.keyword_position = match.position
+            stat.keyword_impressions = match.impressions
+        rows.append(stat)
+
+    if metrics:
+        # A real ranking: what earns impressions, most first. Pages Search
+        # Console said nothing about sink to the bottom rather than tying at 0.
+        earning = [r for r in rows if r.has_metrics]
+        earning.sort(key=lambda r: (-r.impressions, -r.clicks, r.page))
+        rest = [r for r in rows if not r.has_metrics and r.can_link]
+        rest.sort(key=lambda r: r.page)
+        return (earning + rest)[:limit]
+
+    # No performance data at all — offer the link-eligible pages, unranked.
+    eligible = [r for r in rows if r.can_link]
+    eligible.sort(key=lambda r: (r.bucket != HEALTHY, r.page))
+    return eligible[:limit]
 
 
 # ── The recommendation builders ────────────────────────────────────────────
@@ -496,6 +658,7 @@ def run(site, coverage_df, start: str = "", end: str = "", live: bool = True,
     recommendations += _strengthen_recommendations(report.keywords, coverage_df)
     report.recommendations = recommendations
 
+    report.pages = ranked_pages(coverage_df, metrics, report.keywords)
     report.performance = _performance_summary(metrics, report.keywords)
     report.steps = _steps(counts, recommendations)
 

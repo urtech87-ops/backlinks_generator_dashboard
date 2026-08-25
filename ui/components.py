@@ -115,8 +115,124 @@ def nav_button(label: str, page: str, key: str = "", help: str = "",
 
 
 def data_source_note(source: str) -> None:
-    """One consistent line telling the user whether they're on live or seed data."""
+    """
+    One consistent line telling the user whether they're on live or sample data.
+    Said the same way on every page, so "sample" never quietly reads as "live".
+    """
     if source == "live":
         show_badge("ok", "🟢 Live data from Search Console")
     else:
-        show_badge("warn", "🟡 Seed data — your 16 Aug Search Console snapshot")
+        show_badge("warn", "🟡 SAMPLE data — a saved 16 Aug snapshot, not live")
+
+
+# ── Phase 8: the connection state, said out loud ───────────────────────────
+def connect_banner(creds: bool, ga4_ready: bool = True, site_label: str = "") -> None:
+    """
+    The banner every page carries when the numbers on screen aren't live.
+
+    House rule: a number the app didn't measure is never shown as if it were
+    measured. When Search Console isn't connected the figures come from the
+    saved sample snapshot, and this says so at the TOP of the page — not in a
+    footnote under it — with the one button that fixes it.
+    """
+    if creds and ga4_ready:
+        return
+
+    with st.container(border=True):
+        if not creds:
+            st.markdown("### 🟡 These numbers are SAMPLE data")
+            st.write(
+                "Search Console isn't connected yet, so every figure on this screen "
+                "comes from the saved sample snapshot of "
+                f"{site_label or 'your site'} — useful for finding your way around, "
+                "but it is **not** what Google is reporting today. Connect your data "
+                "and the sample is replaced by live figures the moment you refresh."
+            )
+        else:
+            st.markdown("### 🟡 Half connected — Search Console only")
+            st.write(
+                f"Search Console is connected, but {site_label or 'this site'} has no "
+                "GA4 property ID, so the audience side of the dashboard (real visitors, "
+                "where they come from, what they land on) stays empty."
+            )
+        # The button goes where the actual gap is: the key file lives in Google
+        # APIs, the per-site GA4 property ID lives in Sites.
+        label, target, detail = (
+            ("🔌 Connect Search Console + GA4", "🔑 Google APIs",
+             "You need one Google service-account JSON file, added as a user in Search "
+             "Console and as a Viewer in GA4. It takes about five minutes and it's the "
+             "step everything else stands on.")
+            if not creds else
+            ("🔌 Add the GA4 property ID", "🌐 Sites",
+             "GA4 → Admin → Property details has the numeric ID. Everything except the "
+             "Audience view already works without it.")
+        )
+        cols = st.columns([2, 3])
+        with cols[0]:
+            st.button(label, type="primary", width="stretch",
+                      key=f"connect_banner_{'gsc' if not creds else 'ga4'}",
+                      on_click=lambda t=target: st.session_state.update(
+                          nav="Settings", settings_section=t),
+                      help=f"Opens Settings on the {target} section.")
+        cols[1].caption(detail)
+
+
+DONE, NOW, LATER = "done", "now", "later"
+
+_STEP_STATE = {DONE: ("ok", "done"), NOW: ("warn", "you are here"),
+               LATER: ("idle", "next")}
+
+
+def onboarding_strip(steps: list) -> None:
+    """
+    The three-step spine of the whole tool, always visible at the top of the
+    Overview: connect data → review what's ranking → generate links + content.
+
+    `steps` = [{'title', 'detail', 'state', 'button'?, 'page'?, 'help'?}, ...]
+    where state is done / now / later.
+    """
+    cols = st.columns(len(steps))
+    for i, (col, step) in enumerate(zip(cols, steps), 1):
+        with col:
+            with st.container(border=True):
+                state, label = _STEP_STATE.get(step.get("state", LATER),
+                                               _STEP_STATE[LATER])
+                head, badge = st.columns([3, 2])
+                head.markdown(f"**{i} · {step['title']}**")
+                with badge:
+                    show_badge(state, label)
+                st.caption(step["detail"])
+                if step.get("button") and step.get("page"):
+                    nav_button(step["button"], step["page"],
+                               key=f"onboard_{i}", help=step.get("help", ""),
+                               type="primary" if state == "warn" else "secondary")
+
+
+# The words this dashboard can't avoid using, in plain language. Anywhere one of
+# them appears on screen, `jargon_note()` is what explains it.
+JARGON = {
+    "Impressions": "How many times one of your pages appeared in Google's results. "
+                   "Appearing isn't the same as being clicked.",
+    "Clicks": "How many times someone actually clicked through to your page from Google.",
+    "Average position": "Where you typically sit in the results list. 1 is the top of "
+                        "page one; anything past ~10 is page two, where almost nobody looks.",
+    "Indexed": "Google has accepted the page and will show it in results. Pages that "
+               "aren't indexed cannot receive traffic at all, no matter how many links "
+               "point at them.",
+    "Striking distance": "A search you already rank 5th-20th for, with real impressions. "
+                         "The cheapest traffic you own — the page is already close.",
+    "Crawl budget": "Google knows the page exists but hasn't bothered to fetch it yet. "
+                    "The one situation where a backlink genuinely changes indexing.",
+    "Backlink": "A link to your page from somewhere else. It's a vote of confidence — "
+                "and it only counts for a page Google has already indexed.",
+}
+
+
+def jargon_note(*words: str, title: str = "❓ What these words mean") -> None:
+    """A collapsed glossary for the jargon actually used on this screen."""
+    picked = [(w, JARGON[w]) for w in words if w in JARGON]
+    if not picked:
+        return
+    with st.expander(title):
+        for word, meaning in picked:
+            st.markdown(f"**{word}** — {meaning}")

@@ -138,6 +138,16 @@ SITES: list[Site] = _build_sites()
 SITES_BY_KEY = {s.key: s for s in SITES}
 
 
+def ga4_ready(site: Site) -> bool:
+    """
+    True when GA4 can actually be queried for this site — the key file AND a
+    property ID. Kept separate from `credentials_available()` on purpose: one
+    service account serves both APIs, but a site with no GA4 property ID is not
+    connected to GA4, and the UI must not claim it is.
+    """
+    return bool(credentials_available() and site.ga4_property_id)
+
+
 def wp_credentials(site: Site) -> dict:
     """
     WordPress details for one site, with a fallback to the single legacy

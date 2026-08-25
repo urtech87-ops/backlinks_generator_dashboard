@@ -1,0 +1,4 @@
+# Test-only dependencies. The dashboard itself needs nothing in this file —
+# install it when you want to run `pytest -q` against the UI.
+-r requirements.txt
+pytest>=8.0

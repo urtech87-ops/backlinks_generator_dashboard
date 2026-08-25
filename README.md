@@ -23,28 +23,36 @@ streamlit run app.py
 ```
 
 It opens on the **Overview**, already populated: with no credentials at all you get the
-full Fix Plan from your real 16 August Search Console snapshot. Every missing key
-degrades to a stated fallback — seed data, an image brief, a disabled button — never a
-crash.
+full Fix Plan from a saved 16 August Search Console snapshot, and a banner at the top of
+every page saying so in as many words — those figures are **sample data**, with one
+button that connects the real thing. Every missing key degrades to a stated fallback —
+sample data, an image brief, a disabled button — never a crash.
 
 ## The loop it's built around
 
 ```
-Overview  →  run the analysis  →  an ordered list of what to do
+1 connect data  →  2 review what's ranking  →  3 generate backlinks + content
+
+Overview  →  your pages, ranked on real impressions
                                       │
       ┌───────────────────────────────┼───────────────────────────────┐
       ▼                               ▼                               ▼
-  🔴 fix / 🗑️ clear              🟠 rewrite · 🎯 strengthen        🟢 build links
-  → Analysis (Fix Plan,          → Content, topic + keyword       → Backlinks, target
-    filtered, page called out)     + direction filled in            page preselected
+  🔧 Fix                          ✍️ Write article                🔗 Build backlinks
+  → Analysis (Fix Plan,           → Content, topic + keyword      → Backlinks, target
+    filtered, page called out)      + direction filled in           page preselected
 ```
 
-**Overview** is the conductor. Press **Run the analysis** and it reads your coverage,
-your Search Console performance and the queries you already rank for, then sorts every
-page into one of five things it needs — fix the URL, rewrite it, delete or noindex it,
-build links to it, strengthen it for a keyword. Open a step and each page carries the
-button that does the job, on the page that does it. Nothing is written or published from
-Overview; it hands the work over with the boxes already filled in.
+**Overview** is the spine. It is the page you land on, and with Search Console connected
+it loads your figures by itself — no button to find first. It shows how much of the site
+Google has actually indexed, then **your pages ranked by the impressions and clicks they
+earn**, then the searches you sit 5th-20th for. Every row carries the same three
+buttons, and each one opens the page that does the job with the work already filled in.
+A button that would be wasted is disabled with the reason next to it: there is no
+"build backlinks" on a page Google can't even reach.
+
+Under that sits the ordered to-do list, which sorts every page into one of five things
+it needs — fix the URL, rewrite it, delete or noindex it, build links to it, strengthen
+it for a keyword. Nothing is written or published from Overview; it hands the work over.
 
 The order is deliberate and it is not the flattering one: broken URLs first, then
 rejected content, then crawl budget, then links. A backlink to a page Google hasn't
@@ -54,7 +62,7 @@ indexed does nothing.
 
 | Page | What it's for |
 |---|---|
-| **🏠 Overview** | Run the analysis · indexing health · what to do next, with the button that does it · system status |
+| **🏠 Overview** | The three-step strip · indexing health · your pages ranked, with Build backlinks / Write article / Fix on every row · striking-distance searches · what to do next · system status |
 | **🔍 Analysis** | Fix Plan (filterable, per-bucket actions) · Indexing · Performance (GSC) · Audience (GA4) |
 | **💡 Opportunities** | Content gaps from competitors + your own coverage · the optional keyword engine |
 | **✍️ Content** | Topic → research → SEO/AEO/GEO article → images → WordPress **draft** |
@@ -75,8 +83,9 @@ default" rather than "wipe this setting".
    management).
 2. **Settings → Test connections** — checks the sitemap, Search Console access, Search
    Analytics, URL Inspection and GA4 separately, and names the step that failed.
-3. **Refresh live data** in the sidebar — replaces the seed snapshot with live coverage
-   (one URL Inspection call per URL, so it takes a minute on a big site).
+3. **Refresh live data** in the sidebar — replaces the sample snapshot with live coverage
+   (one URL Inspection call per URL, so it takes a minute on a big site). The Overview's
+   figures and rankings re-load with it.
 4. **Settings → AI models** — an OpenRouter key, then a model per agent. Cheap for
    Analysis and Backlinks; your strongest model for Content, because it has to rank.
 5. Optional as you need them: WordPress application passwords per site, dev.to /
@@ -168,7 +177,9 @@ agents/             analysis.py    the triage Overview conducts from
                     opportunity.py competitor + coverage gap finder
 publishers/         one module per platform you own: dev.to, Blogger, your WordPress
 ui/                 components (headers, badges, metric rows, readiness strips, empty
-                    states), the shared data loader, one module per page in views/
+                    states, the sample-data banner, the onboarding strip, the jargon
+                    glossary), the shared data loader, one module per page in views/
+tests/              test_phase8_ux.py — the journey, driven through Streamlit's AppTest
 data/               backlinks.csv — both lanes, one row per event (git-ignored)
 outputs/            what the content agent wrote (git-ignored — it's your content)
 .claude/skills/     the seven-skill content agent (the quality path)
@@ -190,10 +201,29 @@ PHASES.md           the roadmap · PROGRESS.md  living status
 - **Links come last.** Broken URLs, then rewrites, then crawl budget, then links —
   everywhere in the app, because that's the order that actually works.
 - **Your keys stay on your machine.** Everything saves to the local `.env`.
+- **Sample data is labelled sample data.** Until Search Console is connected, every page
+  carries a banner saying the figures come from a saved snapshot, and any list that
+  can't be ranked on real impressions says it isn't a ranking.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+`tests/test_phase8_ux.py` drives the whole journey through Streamlit's own `AppTest`:
+every page renders, a disconnected dashboard says its numbers are samples, the connect
+button lands on the right Settings section, **Refresh live data** really does replace the
+sample snapshot with live coverage, and each of the Overview's three per-row actions
+arrives at its destination page with the right work filled in. Google is stubbed, never
+called — there are no credentials in this repo, and inventing figures is the one thing
+this app refuses to do.
 
 ## Built in phases
 
 This repo was built with **Claude Code**, one phase at a time: foundation and analysis →
 UI shell and settings → backlinks Lane A → backlinks Lane B → the content agent →
-Opportunity Finder and keyword engine → orchestration and polish. All seven are done;
-`PROGRESS.md` is the living record and is written to be pasted into a fresh chat.
+Opportunity Finder and keyword engine → orchestration and polish → the UX and
+completeness pass that made the Overview the spine. All eight are done; `PROGRESS.md` is
+the living record and is written to be pasted into a fresh chat.

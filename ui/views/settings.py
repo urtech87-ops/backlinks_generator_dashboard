@@ -4,6 +4,11 @@ Settings — every option in one place, in plain language.
 Reads and writes the `.env` file through `core.config`, so nothing here needs
 hand-editing a file. Secrets are write-only in the UI: once saved, the box
 shows "saved" rather than the value, and leaving it blank keeps what's there.
+
+The page is one section at a time, picked by a radio bound to `settings_section`
+(Phase 8). That key is the deep link: any page can send you straight to the
+section that fixes its problem — the sample-data banner targets 🔑 Google APIs,
+the GA4 status row targets 🌐 Sites — which tabs could not do.
 """
 
 import streamlit as st
@@ -25,24 +30,16 @@ def render(ctx) -> None:
                  f".env {'found' if exists else 'will be created'} · {config.ENV_PATH}")
     st.write("")
 
-    tabs = st.tabs(["🌐 Sites", "🔑 Google APIs", "🤖 AI models",
-                    "🎨 Content tools", "🔗 Backlink platforms", "🔎 Prospecting",
-                    "✉️ Outreach email"])
-
-    with tabs[0]:
-        _sites_tab()
-    with tabs[1]:
-        _google_tab(ctx)
-    with tabs[2]:
-        _models_tab()
-    with tabs[3]:
-        _group_tab(schema.CONTENT_TOOLS)
-    with tabs[4]:
-        _group_tab(schema.PLATFORMS)
-    with tabs[5]:
-        _prospecting_tab()
-    with tabs[6]:
-        _email_tab()
+    # Sections rather than tabs, because other pages deep-link into them: the
+    # "Connect Search Console + GA4" button sets `settings_section` and lands
+    # you on Google APIs instead of dropping you on Sites to go hunting.
+    section = st.radio(
+        "Which settings?", list(SECTIONS), key="settings_section", horizontal=True,
+        help="Everything saves to your local .env file. Nothing is sent anywhere.",
+    )
+    st.caption(SECTION_HELP[section])
+    st.divider()
+    SECTIONS[section](ctx)
 
 
 # ── Shared field rendering ─────────────────────────────────────────────────
@@ -99,7 +96,7 @@ def _group_tab(group: schema.Group) -> None:
 
 
 # ── Prospecting + outreach email ───────────────────────────────────────────
-def _prospecting_tab() -> None:
+def _prospecting_tab(ctx=None) -> None:
     _group_tab(schema.PROSPECTING)
 
     st.caption(f"Currently prospecting with **{search.PROVIDERS[search.provider()]}**. "
@@ -112,7 +109,7 @@ def _prospecting_tab() -> None:
         (st.success if result["ok"] else st.error)(result["detail"])
 
 
-def _email_tab() -> None:
+def _email_tab(ctx=None) -> None:
     _group_tab(schema.EMAIL)
 
     st.info("Email is optional and never automatic. The only thing that can send a "
@@ -129,7 +126,7 @@ def _email_tab() -> None:
 
 
 # ── Sites ──────────────────────────────────────────────────────────────────
-def _sites_tab() -> None:
+def _sites_tab(ctx=None) -> None:
     c.section("Your sites",
               "Which properties the dashboard watches, and where it files drafts. "
               "Add or remove sites in core/config.py → SITE_DEFAULTS.")
@@ -158,6 +155,26 @@ def _sites_tab() -> None:
 
 # ── Google ─────────────────────────────────────────────────────────────────
 def _google_tab(ctx) -> None:
+    st.info("**This is step 1 of the whole dashboard.** One Google service-account file "
+            "unlocks both Search Console (which pages are indexed, what they rank for) "
+            "and GA4 (who actually turns up). Until it's here, every number you see is "
+            "sample data.", icon="🔌")
+
+    with st.expander("How to get the file, in four steps", expanded=not ctx.creds):
+        st.markdown(
+            "1. In **Google Cloud Console**, create a project (or open an existing one) "
+            "and enable the **Search Console API** and the **Google Analytics Data API**.\n"
+            "2. Under **IAM & Admin → Service Accounts**, create a service account and "
+            "add a **JSON key**. Download it.\n"
+            "3. Save that file inside this project folder — `config/service_account.json` "
+            "is the default — and put its path in the box below.\n"
+            "4. Grant the service account's email address access: in **Search Console → "
+            "Settings → Users and permissions** (Full or Restricted), and in "
+            "**GA4 → Admin → Property access management** (Viewer is enough)."
+        )
+        st.caption("The file never leaves this machine. Only its *path* is written to "
+                   ".env.")
+
     _group_tab(schema.GOOGLE)
 
     email = config.service_account_email()
@@ -169,8 +186,11 @@ def _google_tab(ctx) -> None:
             st.warning("A file is there, but it isn't valid service-account JSON — "
                        "re-download the key from Google Cloud.")
     else:
-        st.warning(f"No key file at `{config.service_account_file()}` yet. "
-                   "Search Console and GA4 views stay on seed/empty until it's there.")
+        st.warning(f"No key file at `{config.service_account_file()}` yet, so the "
+                   "dashboard is running on the sample snapshot and every live-only "
+                   "view is empty.")
+
+    _ga4_status()
 
     st.divider()
     c.section(f"Test connections · {ctx.site.label}",
@@ -192,7 +212,43 @@ def _google_tab(ctx) -> None:
         c.check_list(checks)
         if all(chk["ok"] for chk in checks):
             st.success("All green. Press **Refresh live data** in the sidebar to replace "
-                       "the seed snapshot with live coverage.")
+                       "the sample snapshot with live coverage, then open the Overview.")
+            c.nav_button("🏠 Back to the Overview", "Overview", key="conn_to_overview",
+                         type="primary",
+                         help="Your pages, ranked on real figures, with the buttons that "
+                              "act on each one.")
+        else:
+            st.caption("Fix the red line above and run the test again — each check is "
+                       "independent, so the first failure names the exact step.")
+
+
+def _ga4_status() -> None:
+    """
+    GA4 gets its own line, because one key file is not the same as GA4 being
+    readable: without a property ID per site there is nothing to query, and the
+    dashboard must not report that as connected.
+    """
+    st.write("")
+    c.section("Which sites can be read", "Search Console needs the property to match; "
+                                         "GA4 additionally needs a numeric property ID "
+                                         "per site.")
+    rows = []
+    for site in config.SITES:
+        ready = config.ga4_ready(site)
+        rows.append({
+            "name": site.label,
+            "state": "ok" if ready else ("warn" if config.credentials_available()
+                                         else "idle"),
+            "label": "GA4 ready" if ready else "no GA4 property ID",
+            "detail": (f"Search Console: {site.gsc_property} · GA4 property "
+                       f"{site.ga4_property_id}." if ready else
+                       f"Search Console: {site.gsc_property} · no GA4 property ID saved, "
+                       "so the Audience view stays empty for this site."),
+        })
+    c.status_rows(rows)
+    st.button("Add a GA4 property ID", key="ga4_to_sites",
+              on_click=lambda: st.session_state.update(settings_section="🌐 Sites"),
+              help="Opens the Sites section, where each site's GA4 property ID lives.")
 
 
 # ── Models ─────────────────────────────────────────────────────────────────
@@ -205,7 +261,7 @@ def _model_options(key_present: bool) -> list:
     return openrouter.list_models()
 
 
-def _models_tab() -> None:
+def _models_tab(ctx=None) -> None:
     group = schema.MODELS
     c.section(group.title, group.blurb)
 
@@ -258,3 +314,34 @@ def _model_picker(field: schema.Field, live: list) -> str:
     if suggested and choice != suggested:
         st.caption(f"Suggested for this agent: `{suggested}`")
     return choice
+
+
+# ── The sections, in the order you'd set them up ───────────────────────────
+# Keys double as the labels on the picker, so a deep link is just the label.
+SECTIONS = {
+    "🌐 Sites": _sites_tab,
+    "🔑 Google APIs": _google_tab,
+    "🤖 AI models": _models_tab,
+    "🎨 Content tools": lambda ctx=None: _group_tab(schema.CONTENT_TOOLS),
+    "🔗 Backlink platforms": lambda ctx=None: _group_tab(schema.PLATFORMS),
+    "🔎 Prospecting": _prospecting_tab,
+    "✉️ Outreach email": _email_tab,
+}
+
+SECTION_HELP = {
+    "🌐 Sites": "One entry per site: the exact Search Console property, the sitemap the "
+               "page list is read from, the GA4 property ID, and where WordPress drafts "
+               "are filed.",
+    "🔑 Google APIs": "The one service-account file that unlocks both Search Console and "
+                     "GA4 — the step everything else in this dashboard stands on.",
+    "🤖 AI models": "One OpenRouter key, three model choices. Cheap models for analysis "
+                   "and backlinks; your strongest model for content that has to rank.",
+    "🎨 Content tools": "Images and keywords. Both optional — left unset, the agents write "
+                       "image briefs and skip search volumes rather than inventing either.",
+    "🔗 Backlink platforms": "Accounts you own, and the only places this app may publish "
+                            "by itself.",
+    "🔎 Prospecting": "How guest-post prospects are searched for. Read-only: prospecting "
+                     "never contacts anyone.",
+    "✉️ Outreach email": "Optional. The only thing that can ever send is the approval "
+                        "button on the Backlinks page, one pitch at a time.",
+}

@@ -77,3 +77,26 @@ GSC; the keyword branch can be turned on/off.
 **Build:** an Overview page that runs analysis → shows recommendations → launches
 backlink/content actions; consistency pass on UI; update `README.md`.
 **Done when:** from Overview you can go data → recommendation → action end to end.
+
+## Phase 8 — UX + completeness pass  ·  *the core journey, made obvious*
+**Goal:** Make the tool's actual purpose — connect GA4 + Search Console → see which pages
+and keywords are ranking → one click to build backlinks or write an article for *that*
+page — visible and reachable without hunting. Audit first, then fix.
+**Read first:** `PROGRESS.md`, `app.py`, all of `ui/`, `agents/analysis.py`.
+**Build:**
+- **Not-connected state:** a banner on every page saying the numbers are SAMPLE data,
+  with a prominent "Connect Search Console + GA4" button that deep-links into Settings.
+  Verify the seed really is replaced by live data on refresh.
+- **Overview as the spine:** landing page, indexing health, a ranked list of the pages
+  that actually earn impressions/clicks/position, striking-distance queries, and on
+  every row the three one-click actions — Build backlinks · Write article · Fix — each
+  pre-filling the agent that does the job.
+- **A three-step onboarding strip:** 1 Connect data · 2 Review what's ranking ·
+  3 Generate backlinks + content, tracking real state rather than a tutorial flag.
+- **Polish everywhere:** plain-language labels, a one-line helper under every control,
+  a glossary for the jargon each screen uses, consistent section headers / metric rows /
+  status badges, and a guided empty state in place of every bare table.
+**Done when:** a first-time user lands on the Overview, is told in one line that the
+numbers are samples and how to fix that, and — once connected — can see their best pages
+ranked and launch a backlink run or an article for one of them in a single click.
+

@@ -47,6 +47,11 @@ def render(ctx) -> None:
             "the first place — the Fix Plan's orange bucket is the receipt. Every path "
             "here ends in a **draft** you review, never a live post.", icon="⚠️")
 
+    st.caption("The path is always the same: say what the article is about → the agent "
+               "researches it → you read and edit the draft → it's filed as a WordPress "
+               "**draft** for you to publish yourself.")
+    c.jargon_note("Impressions", "Striking distance", "Indexed")
+
     coverage_df, _ = d.coverage_frame(site)
     _readiness(site)
     st.divider()

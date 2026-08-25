@@ -39,6 +39,11 @@ def render(ctx) -> None:
         "your real Search Console queries.",
     )
 
+    st.caption("**Opportunity Finder** answers “what should I write next?” · "
+               "**Keywords** answers “which words should I write it for?” Neither one "
+               "invents a search volume: anything nothing measured says *unvalidated*.")
+    c.jargon_note("Impressions", "Average position", "Striking distance")
+
     tab_finder, tab_keywords = st.tabs(["💡 Opportunity Finder", "🔑 Keywords"])
     with tab_finder:
         _finder(ctx)
@@ -150,8 +155,9 @@ def _results(ctx, result, coverage_source: str) -> None:
                   for kind in (opp.STRIKING, opp.GAP, opp.ORPHAN, opp.REWRITE)])
 
     if coverage_source == "seed":
-        st.caption("Your side of the comparison is the 16 Aug seed snapshot — refresh live "
-                   "data in the sidebar once Search Console is connected.")
+        st.caption("⚠️ Your side of the comparison is the SAMPLE 16 Aug snapshot, not "
+                   "today's figures. Connect Search Console and press **Refresh live "
+                   "data** in the sidebar for a comparison against your real coverage.")
 
     kinds = st.multiselect(
         "Show", options=[k for k in (opp.STRIKING, opp.GAP, opp.ORPHAN, opp.REWRITE)
