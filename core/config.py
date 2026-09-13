@@ -115,6 +115,12 @@ SITE_DEFAULTS = [
         "sitemap_url": "https://toolacademy.com/sitemap_index.xml",
         "homepage": "https://toolacademy.com/",
     },
+    {
+        "key": "toolshall", "label": "ToolsHall", "env_prefix": "TS",
+        "gsc_property": "https://toolshall.com/",
+        "sitemap_url": "https://toolshall.com/sitemap_index.xml",
+        "homepage": "https://toolshall.com/",
+    },
 ]
 
 
