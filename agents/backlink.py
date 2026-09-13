@@ -108,6 +108,29 @@ def _reason(bucket: str, impressions: int, position: float, has_metrics: bool) -
             "a long way from page one — content matters more than links at this depth.")
 
 
+# Mirrors agents/opportunity.py's own_coverage() tool/article split — any path
+# with a content-section segment reads as an article, everything else a tool
+# page. Duplicated rather than imported: opportunity -> outreach -> backlink is
+# already the import chain, so backlink importing opportunity would be circular.
+_ARTICLE_PATH = re.compile(r"/(blog|blogs|article|articles|post|posts|news)/", re.IGNORECASE)
+
+
+def _importance(url: str, homepage: str) -> tuple:
+    """
+    A brand-new site has no Search Console performance yet, so there's nothing
+    to score a ranking on. Rank its eligible pages by structural importance
+    instead of leaving them tied/alphabetical: the homepage first, then
+    shallower URLs (fewer path segments = more important), then tool pages
+    ahead of articles at the same depth.
+    """
+    if homepage and url.rstrip("/") == homepage.rstrip("/"):
+        return (0, 0, 0)
+    path = re.sub(r"https?://[^/]+", "", url).strip("/")
+    depth = len([p for p in path.split("/") if p]) or 1
+    is_article = bool(_ARTICLE_PATH.search(url))
+    return (1, depth, 1 if is_article else 0)
+
+
 def rank_targets(site, coverage_df, start: str = "", end: str = "",
                  limit: int = 25, metrics: dict = None) -> tuple:
     """
@@ -159,7 +182,12 @@ def rank_targets(site, coverage_df, start: str = "", end: str = "",
             has_metrics=bool(m),
         ))
 
-    targets.sort(key=lambda t: (-t.score, t.page))
+    if source == "live":
+        targets.sort(key=lambda t: (-t.score, t.page))
+    else:
+        # No performance data to rank on (a new site Google is still crawling,
+        # most likely) — importance, not a tied score, decides the order.
+        targets.sort(key=lambda t: _importance(t.url, site.homepage))
     return targets[:limit], source
 
 

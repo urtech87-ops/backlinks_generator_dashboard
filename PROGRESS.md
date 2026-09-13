@@ -5,8 +5,9 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-08-25 · **Current phase:** Phase 8 done — **the build is complete**
-**Overall:** ▓▓▓▓▓▓▓▓ 100% (all eight phases shipped. Phase 7 made Overview the conductor;
+**Last updated:** 2026-09-13 · **Current phase:** Phase 9 done — **a third site, honest
+ranking for it, and an active tracker**
+**Overall:** ▓▓▓▓▓▓▓▓▓ 100% (all nine phases shipped. Phase 7 made Overview the conductor;
 Phase 8 made it the *spine*: it is the landing page, it shows your pages ranked on the
 impressions they actually earn, and every row carries the three buttons that act on it —
 Build backlinks · Write article · Fix — each pre-filling the agent that does the job. A
@@ -216,6 +217,38 @@ quality content; backlinks are the visible target, not the engine.
       in. Also fixed on the way past: the Backlinks eligible-pages table put `""` in a
       numeric column, which made Arrow fail to serialise it.
 
+- [x] **Phase 9 — Third site + new-site ranking + an active tracker** — a small, scoped
+      addition, not a new phase of build.
+      **ToolsHall (toolshall.com)** is now a third configured site: a `SITE_DEFAULTS`
+      entry in `core/config.py` and matching `TS_*` keys in `.env.example`, in exactly
+      the `TV_*`/`TA_*` pattern. ToolAcademy is untouched — all three sites coexist, and
+      Settings' `for site in config.SITES` loops picked the third one up with no other
+      code change.
+      **`agents/backlink.rank_targets()` gained a new-site fallback.** A site with
+      coverage rows but no Search Console performance (a brand-new property, most
+      likely) used to rank its eligible pages by a score that was flat within each
+      bucket, so the real order was alphabetical — arbitrary, not honest. It now sorts
+      by structural importance instead (`_importance()`): homepage first, then
+      shallower URLs, then tool pages ahead of articles at the same depth (the same
+      tool/article split `agents/opportunity.own_coverage()` uses — duplicated rather
+      than imported, since opportunity → outreach → backlink is already the import
+      chain and importing back would be circular). Sites *with* performance data are
+      untouched — same striking-distance score as before. A site with zero coverage
+      rows still returns an empty list; Phase 9 does not invent targets for a page
+      Google hasn't discovered.
+      **The tracker is now active, not just a log.** `core/tracker.link_history()`
+      reads how many non-failed attempts already point at a page and when the most
+      recent one was; the Backlinks page's Lane A target picker shows "🔗 Already
+      linked N times — most recent DATE" right on the selected row when that's true —
+      the same spirit as Lane B's "you've already pitched this domain" notice.
+      Informational only; it has never blocked a re-run and doesn't start now.
+      *Note:* verified with a stubbed `core.gsc` (this environment still has no Google
+      key) against a synthetic coverage frame: the new-site fallback orders homepage →
+      shallow tool page → deeper article → crawl-budget page correctly, the live
+      metrics path produces the exact same ordering as before Phase 9, a zero-coverage
+      site still returns `[]`, and `link_history()` counts a live and a draft entry
+      but skips a failed one for the same URL.
+
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
 - `core/` package: `config` (now readable *and* writable), `settings` (the option
@@ -395,14 +428,22 @@ quality content; backlinks are the visible target, not the engine.
   refreshing coverage invalidates it.
 - **Phase 8 · the repo has tests.** `tests/test_phase8_ux.py`, 16 AppTest cases, run
   with `pip install -r requirements-dev.txt && pytest -q`.
+- **Phase 9 · ToolsHall** is a third `SITE_DEFAULTS` entry (`TS_*` keys), sitting
+  alongside ToolsVenue and ToolAcademy without touching either.
+- **Phase 9 · `agents/backlink._importance()` + the new-site branch in `rank_targets()`.**
+  No-performance-data sites rank on structural importance (homepage → shallow →
+  tool-over-article) instead of a tied score read out alphabetically.
+- **Phase 9 · `core/tracker.link_history()`** — count + most-recent-date of non-failed
+  prior attempts at one URL, read by the Backlinks page's new "already linked" warning.
 
 ## Next up (start here)
-**The build is done — every phase through 8 is ticked.** What the project needs now is its
+**The build is done — every phase through 9 is ticked.** What the project needs now is its
 first real run: this environment has never had a Google key, an OpenRouter key or a
 platform key, so every path has been verified against stubs and none against a live
 account. Work the list below in order; each item is the first time a piece of this touches
 reality. Phase 8 removed the last excuse for not starting — connect Google and the Overview
-fills in by itself.
+fills in by itself. ToolsHall (Phase 9) is configured but has no credentials here either —
+it needs the same `TS_*` values filled in before it shows anything but sample data.
 
 **First real run (in this order):**
 - Connect Google: **Settings → Google APIs**, then **Test connections**, then **Refresh

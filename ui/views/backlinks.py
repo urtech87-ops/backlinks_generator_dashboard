@@ -143,6 +143,7 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
     with st.container(border=True):
         st.markdown(f"**{target.url}**")
         st.caption(target.reason)
+        _link_history_warning(site, target)
         if target.has_metrics:
             c.metric_row([
                 ("Clicks", target.clicks, "Visits Google sent this page in the "
@@ -273,6 +274,21 @@ def _target_keywords(ctx, target) -> None:
     if striking:
         st.caption("🎯 = striking distance. A link to this page is most likely to pay off "
                    "on those terms.")
+
+
+def _link_history_warning(site, target) -> None:
+    """
+    The tracker's active half: say up front when this exact page already has
+    links logged, like Lane B's "you've already pitched this domain" notice.
+    Purely informational — publishing again is never blocked.
+    """
+    history = tracker.link_history(site.key, target.url, lane=tracker.LANE_OWNED)
+    if not history["count"]:
+        return
+    n = history["count"]
+    st.warning(f"🔗 Already linked {n} time{'s' if n != 1 else ''} — most recent "
+               f"{history['latest']}. Publishing again adds another post pointing here; "
+               "that's your call, just don't overdo it on one page.", icon="⚠️")
 
 
 def _opportunity_icon(target) -> str:

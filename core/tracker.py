@@ -187,6 +187,23 @@ def summary(site_key: str = "", lane: str = LANE_OWNED) -> dict:
     }
 
 
+def link_history(site_key: str, target_url: str, lane: str = LANE_OWNED) -> dict:
+    """
+    How many times this page already has a non-failed link attempt logged, and
+    when the most recent one was. This is the active half of the tracker: the
+    Backlinks page warns with it before you publish again, the same way Lane B
+    warns before you re-pitch a domain — informational only, never a block.
+    """
+    df = load(site_key, lane=lane)
+    if df.empty:
+        return {"count": 0, "latest": ""}
+    prior = df[(df["target_url"] == target_url) & (df["status"] != "failed")]
+    if prior.empty:
+        return {"count": 0, "latest": ""}
+    # `load()` already sorts newest first, so row 0 is the most recent.
+    return {"count": int(len(prior)), "latest": str(prior.iloc[0]["logged_at"])[:10]}
+
+
 # ── Lane B: fold the history into one row per prospect ─────────────────────
 def guest_board(site_key: str = "") -> pd.DataFrame:
     """
