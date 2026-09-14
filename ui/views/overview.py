@@ -296,6 +296,7 @@ def _whats_ranking(ctx, report, coverage_source: str) -> None:
     st.write("")
     _striking(ctx, report)
     c.jargon_note("Impressions", "Clicks", "Average position", "Striking distance")
+    c.legend("❓ What each page's verdict means", analysis.VERDICT_LEGEND)
 
 
 def _performance_totals(ctx, report) -> None:
@@ -362,6 +363,10 @@ def _page_row(stat, index: int) -> None:
                 st.caption(f"🎯 Closest search: “{stat.keyword}” — position "
                            f"{stat.keyword_position} on "
                            f"{stat.keyword_impressions:,} impressions.")
+            v = stat.verdict
+            c.show_badge(analysis.VERDICT_STATE.get(v["label"], "idle"),
+                         f'{v["icon"]} {v["label"]}')
+            st.caption(v["reason"])
         with badge:
             c.show_badge(stat.status_state, stat.status_label)
             st.caption(stat.coverage)
