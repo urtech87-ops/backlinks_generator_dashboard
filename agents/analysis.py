@@ -92,6 +92,95 @@ class Recommendation:
                 "in this date range.")
 
 
+# ── Page verdict — what one page needs, in one clear bucket (Phase 11) ─────
+# Every number this decision is made from lives here, in one place, so tuning
+# it never means hunting through the two screens that display the result.
+VERDICT_THRESHOLDS = {
+    "top_position": 3,             # position 1-3 = "top of page one"
+    "backlink_min_position": 4,    # the backlink-candidate band starts here...
+    "backlink_max_position": 20,   # ...and ends here (matches kw.STRIKING_MAX)
+    "low_ctr_pct": 3.0,            # click rate (%) below this, at a top
+                                    # position, counts as "isn't earning clicks"
+}
+
+V_NOT_INDEXED = "Not indexed"
+V_IMPROVE = "Improve the page"
+V_BACKLINK = "Backlink candidate"
+V_FIX_TITLE = "Fix the title/description"
+V_WINNING = "Winning"
+V_NO_DATA = "Not enough data yet"        # honest fallback — never a guess
+
+VERDICT_ICON = {
+    V_NOT_INDEXED: "🔴", V_IMPROVE: "🟠", V_BACKLINK: "🟢",
+    V_FIX_TITLE: "🟡", V_WINNING: "🏆", V_NO_DATA: "⚪",
+}
+
+# Badge colour state, the same "ok/warn/bad/idle" vocabulary ui.components uses.
+VERDICT_STATE = {
+    V_NOT_INDEXED: "bad", V_IMPROVE: "warn", V_BACKLINK: "ok",
+    V_FIX_TITLE: "warn", V_WINNING: "ok", V_NO_DATA: "idle",
+}
+
+VERDICT_REASON = {
+    V_NOT_INDEXED: "Fix indexing first — links and content do nothing yet.",
+    V_IMPROVE: "Improve the page — content isn't strong enough to rank; a "
+               "backlink won't help at this position.",
+    V_BACKLINK: "Backlink candidate — close to page one, a link can push it over.",
+    V_FIX_TITLE: "Fix the title/description — it ranks but isn't earning clicks.",
+    V_WINNING: "Winning — leave it, monitor.",
+    V_NO_DATA: "No Search Console figures for this page in this date range, so "
+               "there's nothing to judge it on yet.",
+}
+
+# The five real verdicts, worst problem first — what the legend on screen
+# explains. V_NO_DATA isn't one of the five: it's the honest state for a page
+# with nothing measured yet, so it's left out on purpose.
+VERDICT_LEGEND = [
+    (VERDICT_ICON[V_NOT_INDEXED], V_NOT_INDEXED,
+     "Google hasn't accepted the page yet, so no amount of content or links "
+     "can help it until that's fixed."),
+    (VERDICT_ICON[V_IMPROVE], V_IMPROVE,
+     "It shows up in search, but too far down (past position 20) for almost "
+     "anyone to reach. The page itself needs to get better before a link would help."),
+    (VERDICT_ICON[V_BACKLINK], V_BACKLINK,
+     "It's close to page one (roughly position 4-20). This is the ONE case "
+     "where a backlink is actually the right move."),
+    (VERDICT_ICON[V_FIX_TITLE], V_FIX_TITLE,
+     "It's already on page one, but people see it in results and scroll past. "
+     "The title or description is the problem, not the ranking."),
+    (VERDICT_ICON[V_WINNING], V_WINNING,
+     "Page one, and earning clicks. Leave it as it is and keep an eye on it."),
+]
+
+
+def page_verdict(indexed: bool, position: float, impressions: int, ctr: float,
+                 has_metrics: bool, thresholds: dict = None) -> dict:
+    """
+    The one thing a page needs next, decided only from measured numbers —
+    never guessed. `indexed` comes from the coverage classifier; `position` /
+    `impressions` / `ctr` come straight from a Search Console row for this
+    page. Returns {"label", "icon", "reason"}.
+    """
+    t = thresholds or VERDICT_THRESHOLDS
+
+    if not indexed:
+        label = V_NOT_INDEXED
+    elif not has_metrics or not impressions or not position:
+        label = V_NO_DATA
+    elif position >= t["backlink_max_position"]:
+        label = V_IMPROVE
+    elif position >= t["backlink_min_position"]:
+        label = V_BACKLINK
+    elif position <= t["top_position"]:
+        label = V_FIX_TITLE if ctr < t["low_ctr_pct"] else V_WINNING
+    else:
+        # Between "top of page one" and the backlink band (e.g. position 3-4) —
+        # closest in spirit to "nearly there", so it reads the same as backlink.
+        label = V_BACKLINK
+
+    return {"label": label, "icon": VERDICT_ICON[label], "reason": VERDICT_REASON[label]}
+
+
 @dataclass
 class PageStat:
     """
@@ -118,6 +207,12 @@ class PageStat:
     @property
     def indexed(self) -> bool:
         return self.bucket == HEALTHY
+
+    @property
+    def verdict(self) -> dict:
+        """What this page needs next — see page_verdict() above."""
+        return page_verdict(self.indexed, self.position, self.impressions,
+                            self.ctr, self.has_metrics)
 
     @property
     def can_link(self) -> bool:

@@ -10,6 +10,7 @@ Analysis — the four views the Analysis agent feeds.
 import pandas as pd
 import streamlit as st
 
+from agents import analysis as ag
 from core import config, ga4, gsc, seed
 from core.classifier import (
     BUCKET_ORDER, PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, OTHER,
@@ -58,7 +59,7 @@ def render(ctx) -> None:
     with tab_index:
         _indexing(df, source)
     with tab_perf:
-        _performance(ctx)
+        _performance(ctx, df)
     with tab_aud:
         _audience(ctx)
 
@@ -225,7 +226,7 @@ def _indexing(df: pd.DataFrame, source: str) -> None:
 
 
 # ── Performance (GSC Search Analytics) ─────────────────────────────────────
-def _performance(ctx) -> None:
+def _performance(ctx, coverage_df: pd.DataFrame) -> None:
     if not ctx.creds:
         c.empty_state(
             "Performance needs the live Search Console API",
@@ -264,8 +265,18 @@ def _performance(ctx) -> None:
         c.section("Which pages earn the most",
                   "Sorted by impressions. Lots of impressions at a weak average position "
                   "is the best-value row on this table — the demand is already there, "
-                  "the page just isn't high enough yet.")
-        st.dataframe(_perf_frame(pdf), width="stretch", hide_index=True)
+                  "the page just isn't high enough yet. Every row also gets a verdict: "
+                  "the one thing that page needs next.")
+        st.dataframe(
+            _perf_frame(_with_verdicts(coverage_df, pdf)), width="stretch", hide_index=True,
+            column_config={
+                "Verdict": st.column_config.TextColumn(
+                    "Verdict", help="What this page needs next — see the legend below."),
+                "Why": st.column_config.TextColumn(
+                    "Why", help="The one-line reason behind the verdict."),
+            },
+        )
+        c.legend("❓ What each verdict means", ag.VERDICT_LEGEND)
         cols = st.columns([2, 4])
         with cols[0]:
             c.nav_button("🏠 Act on these", "Overview", key="an_perf_overview",
@@ -287,6 +298,32 @@ def _performance(ctx) -> None:
                               "and hands them to the writer.")
         cols[1].caption("A search you rank 5th-20th for, on real impressions, is the "
                         "cheapest traffic you own.")
+
+
+def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame:
+    """
+    Attach "what this page needs next" to each performance row, using the
+    same page_verdict() the Overview's winners list uses — one place decides,
+    two screens display it.
+    """
+    indexed_urls = set()
+    if coverage_df is not None and not coverage_df.empty:
+        indexed_urls = set(coverage_df.loc[coverage_df["Bucket"] == HEALTHY, "URL"]
+                           .str.rstrip("/"))
+
+    def _row_verdict(row):
+        v = ag.page_verdict(
+            indexed=str(row["page"]).rstrip("/") in indexed_urls,
+            position=float(row.get("position", 0) or 0),
+            impressions=int(row.get("impressions", 0) or 0),
+            ctr=float(row.get("ctr", 0) or 0),
+            has_metrics=True,   # this row exists because GSC measured it
+        )
+        return pd.Series({"Verdict": f'{v["icon"]} {v["label"]}', "Why": v["reason"]})
+
+    out = pdf.copy()
+    out[["Verdict", "Why"]] = out.apply(_row_verdict, axis=1)
+    return out
 
 
 def _perf_frame(frame: pd.DataFrame) -> pd.DataFrame:

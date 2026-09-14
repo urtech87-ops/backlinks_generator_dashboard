@@ -5,8 +5,8 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-14 · **Current phase:** Phase 10 done — **two more owned
-publishers, and a manual community/directory tracker**
+**Last updated:** 2026-09-14 · **Current phase:** Phase 11 done — **a plain-English
+"what this page needs" verdict on every ranked page**
 **Overall:** ▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, plus two small scoped
 additions — Phase 9 and Phase 10 — on top. Phase 7 made Overview the conductor;
 Phase 8 made it the *spine*: it is the landing page, it shows your pages ranked on the
@@ -484,6 +484,60 @@ quality content; backlinks are the visible target, not the engine.
   override on `log()` — a manual, no-network tracker for Reddit/HN/Product
   Hunt/AlternativeTo/"awesome"-list submissions, shown as its own section on the
   Backlinks page (`ui/views/backlinks.py::_community_section`).
+- **Phase 11 · `agents/analysis.page_verdict()` + `VERDICT_THRESHOLDS`** — the one
+  function and the one dict that turn a page's indexed status + position +
+  impressions + CTR into exactly one of five plain-English verdicts (Not indexed
+  / Improve the page / Backlink candidate / Fix the title-description / Winning),
+  with a sixth honest "Not enough data yet" for a page nothing's been measured
+  for. `PageStat.verdict` and `ui/views/analysis.py::_with_verdicts()` both call
+  it, so Overview's winners list and the Performance tab's pages table always
+  agree. `ui.components.legend()` + `VERDICT_LEGEND` explain the five in plain
+  English on both screens.
+
+- [x] **Phase 11 — A verdict on every page: what it needs, not just how it's doing** —
+      a small, scoped addition, not a new phase of build.
+      **`agents/analysis.page_verdict()`** is the one function that decides what a
+      page needs next, and **`VERDICT_THRESHOLDS`** is the one dict every number in
+      that decision comes from — position bands, the CTR floor — so tuning them
+      never means hunting through the two screens that display the result. It
+      classifies a page into exactly one of five plain-English verdicts, derived
+      only from measured numbers (indexed status from the coverage classifier;
+      position/impressions/CTR from a Search Console row) and never guessed:
+      **Not indexed** (bucket isn't Healthy) → fix indexing first; **Improve the
+      page** (position 20+, with impressions) → content, not a link, is what's
+      missing; **Backlink candidate** (roughly position 4-20) → the only bucket
+      that recommends a backlink, on purpose; **Fix the title/description**
+      (position 1-3, CTR under the floor) → it ranks but isn't earning clicks;
+      **Winning** (position 1-3, CTR over the floor) → leave it, monitor. A sixth,
+      honest state — **Not enough data yet** — covers an indexed page Search
+      Console has nothing measured for; it's deliberately left out of the legend,
+      since it isn't one of the five real verdicts, the same "never fill a blank
+      with a guess" rule the rest of the dashboard already follows.
+      **`PageStat.verdict`** (a property, so Overview's winners list gets it for
+      free) and **`ui/views/analysis.py`'s `_with_verdicts()`** (which reads the
+      same coverage frame the Fix Plan and Indexing tabs already load, to know
+      which pages are actually Healthy) both call the one function, so the
+      Overview and the Performance tab can never disagree about what a page needs.
+      **Overview's winners list** shows the verdict as a coloured badge plus its
+      one-line reason under every row, right where the three action buttons
+      already sit. **The Performance tab's pages table** gained two columns,
+      Verdict and Why, on the same "which pages earn the most" table the Overview
+      draws its ranking from. **`ui.components.legend()`** is a small new reusable
+      piece — a collapsed expander of (icon, label, explanation) rows — and both
+      screens use it to explain the five verdicts in plain English, aimed at
+      someone with no SEO background; `VERDICT_LEGEND` in `agents/analysis.py` is
+      the one list both legends are built from. Nothing here auto-generates a
+      backlink or touches a publisher — this phase only diagnoses and labels.
+      *Note:* verified with `page_verdict()` called directly against the position
+      / CTR boundaries the spec named (19.9 → Backlink candidate, 20 → Improve the
+      page; CTR exactly at the floor → Winning, just under it → Fix the
+      title/description; indexed with zero impressions → Not enough data yet, not
+      a guess) and with a Streamlit `AppTest` pass driving the whole app through a
+      stubbed live Search Console: the Performance tab's dataframe carries Verdict
+      + Why columns with no exception, and Overview's winners list renders a
+      correctly-coloured badge and reason on every row, matching the same page's
+      row in the Performance tab. `pytest -q` still 16/16 — this phase changed no
+      existing behaviour, only added the verdict alongside it.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its

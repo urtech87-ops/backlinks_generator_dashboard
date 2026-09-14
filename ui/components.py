@@ -236,3 +236,13 @@ def jargon_note(*words: str, title: str = "❓ What these words mean") -> None:
     with st.expander(title):
         for word, meaning in picked:
             st.markdown(f"**{word}** — {meaning}")
+
+
+def legend(title: str, items: list) -> None:
+    """
+    A collapsed legend explaining a fixed set of labels/badges in plain
+    English. `items` = [(icon, label, explanation), ...].
+    """
+    with st.expander(title):
+        for icon, label, explanation in items:
+            st.markdown(f"{icon} **{label}** — {explanation}")
