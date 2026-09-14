@@ -144,6 +144,16 @@ PLATFORMS = Group(
         Field("BLOGGER_REFRESH_TOKEN", "Blogger refresh token",
               "Lets the agent post without you logging in each time.",
               kind="password", secret=True),
+        Field("HASHNODE_TOKEN", "Hashnode personal access token",
+              "Hashnode → your avatar → Developer Settings → Personal Access Tokens.",
+              kind="password", secret=True),
+        Field("HASHNODE_PUBLICATION_ID", "Hashnode publication ID",
+              "Hashnode → your publication → Dashboard → Settings → General."),
+        Field("MEDIUM_TOKEN", "Medium integration token",
+              "Medium → Settings → Security and apps → Integration tokens. Medium "
+              "stopped issuing new ones in 2023 — an existing token still works. Its "
+              "API can't edit or delete a post once created, only create it.",
+              kind="password", secret=True),
     ],
 )
 

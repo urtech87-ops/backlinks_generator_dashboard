@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .base import Article, PublishResult, md_to_html, clean_tags   # noqa: F401
-from . import blogger, devto, wordpress
+from . import blogger, devto, hashnode, medium, wordpress
 
 
 @dataclass
@@ -56,6 +56,21 @@ PLATFORMS = {
         style=("your own site — an existing reader who already trusts the brand. "
                "Useful and specific; it has to be good enough to rank on its own."),
         always_draft=True,
+    ),
+    "hashnode": Platform(
+        key="hashnode", label=hashnode.LABEL,
+        blurb="Publishes to a Hashnode publication you own.",
+        missing=hashnode.missing, publish=hashnode.publish,
+        style=("Hashnode — a technical blogging audience close to dev.to's. Practical, "
+               "example-driven, with a real code snippet or worked example where it helps."),
+    ),
+    "medium": Platform(
+        key="medium", label=medium.LABEL,
+        blurb="Publishes to your own Medium account. Its API can't edit or delete a post "
+              "afterwards, so review carefully before publishing live.",
+        missing=medium.missing, publish=medium.publish,
+        style=("Medium — a general, curious-reader audience. Narrative and clear, light "
+               "on jargon, built around one strong concrete example."),
     ),
 }
 

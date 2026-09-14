@@ -1,11 +1,15 @@
 """
-Backlinks — the main target, in two lanes.
+Backlinks — the main target, in two lanes plus a manual tracker.
 
-  Lane A (Phase 3)  auto-publish to platforms you OWN, logged to a tracker
-  Lane B (Phase 4)  guest outreach: prospect, score, draft, track — you approve
-                    every send, and the host publishes. Nothing on this page can
-                    post to a site you don't own; the only outbound action in
-                    Lane B is one email, sent by one click, after you've read it.
+  Lane A (Phase 3)   auto-publish to platforms you OWN, logged to a tracker
+  Lane B (Phase 4)   guest outreach: prospect, score, draft, track — you approve
+                     every send, and the host publishes. Nothing on this page can
+                     post to a site you don't own; the only outbound action in
+                     Lane B is one email, sent by one click, after you've read it.
+  Community tracker  (Phase 10) a MANUAL log for submissions to places like
+                     Reddit, Hacker News, Product Hunt, AlternativeTo or an
+                     "awesome" list. It never posts anywhere — you do that
+                     yourself — it only remembers what you told it.
 
 The guardrails are stated on the page, not just in code, because they're the
 difference between links that help and a link-spam penalty.
@@ -14,6 +18,8 @@ Lane A walks top to bottom: pick the page that deserves a link → pick the
 platforms you own → generate a draft per platform → read it → publish. Nothing
 publishes without that last click, and every attempt lands in the tracker.
 """
+
+import datetime as dt
 
 import pandas as pd
 import streamlit as st
@@ -73,6 +79,9 @@ def render(ctx) -> None:
         _lane_a(ctx, df)
     with lane_b:
         _lane_b(ctx, df)
+
+    st.divider()
+    _community_section(ctx, df)
 
 
 # ── Lane A ─────────────────────────────────────────────────────────────────
@@ -1012,4 +1021,133 @@ def _board_step(site) -> None:
         "⬇️ Export the outreach board (CSV)", board.to_csv(index=False).encode(),
         file_name=f"{site.key}_guest_outreach.csv", mime="text/csv",
         key="gb_board_export",
+    )
+
+
+# ── Community & directory submissions: a manual tracker, not an auto-poster ─
+# There is deliberately no "submit" action anywhere below. This section only
+# ever writes to the tracker because you filled in a form and pressed Save —
+# it never reads a search result, never drafts anything, and never touches a
+# third-party site. It exists so the same high-value manual outreach Lane B
+# tracks for guest posts has somewhere to live for Reddit threads, Hacker News
+# submissions, Product Hunt launches, directory listings and "awesome" lists.
+def _community_section(ctx, coverage_df: pd.DataFrame) -> None:
+    site = ctx.site
+    c.section("🌐 Community & directory submissions",
+              "A manual tracker for the high-value places an API can't reach — Reddit, "
+              "Hacker News, Product Hunt, AlternativeTo, an \"awesome\" list. Record what "
+              "you submitted and where it stands; nothing here posts anything for you.")
+    st.info("**This never posts anywhere.** You submit it yourself, on the platform's own "
+            "site, then log it here so you can find it again and see what's still "
+            "outstanding.", icon="🛡️")
+
+    with st.expander("➕ Record a submission", expanded=True):
+        pages = coverage_df["URL"].tolist() if coverage_df is not None and not coverage_df.empty else []
+        if pages:
+            picked = st.selectbox(
+                "Pick one of your pages…", options=[""] + pages, key="cm_page_pick",
+                format_func=lambda u: "— choose to fill the box below —" if u == "" else u,
+                help="Optional shortcut — fills the target page box below.",
+            )
+            if picked:
+                st.session_state["cm_target_url"] = picked
+
+        cols = st.columns(2)
+        target_url = cols[0].text_input(
+            "Target page", key="cm_target_url",
+            placeholder="https://yoursite.com/the-page-you-promoted",
+            help="The page on your site this submission points to.",
+        )
+        platform_choice = cols[1].selectbox(
+            "Platform", options=tracker.COMMUNITY_PLATFORM_PRESETS, key="cm_platform_choice",
+        )
+        platform_name = platform_choice
+        if platform_choice == "Other directory or community":
+            platform_name = st.text_input(
+                "Platform name", key="cm_platform_custom",
+                placeholder="e.g. Slant, G2, a niche forum or subreddit",
+            )
+
+        cols2 = st.columns(3)
+        date_val = cols2[0].date_input("Date", value=dt.date.today(), key="cm_date")
+        status = cols2[1].selectbox(
+            "Status", options=tracker.COMMUNITY_STAGES,
+            format_func=lambda s: tracker.STATUS_LABEL.get(s, s), key="cm_status",
+        )
+        post_url = cols2[2].text_input(
+            "Resulting URL (optional)", key="cm_post_url",
+            placeholder="https://reddit.com/r/.../comments/...",
+            help="Fill this in once you have a link to the live thread, post or listing.",
+        )
+        note = st.text_input(
+            "Note (optional)", key="cm_note",
+            placeholder="e.g. posted under u/yourhandle, mods approved after an edit",
+        )
+
+        ready = bool(target_url.strip()) and bool((platform_name or "").strip())
+        if st.button("💾 Save submission", type="primary", key="cm_save", disabled=not ready):
+            tracker.log_community(
+                site.key, target_url.strip(), platform_name.strip(), status,
+                date=date_val.isoformat(), detail=note.strip(), post_url=post_url.strip(),
+            )
+            st.success(f"Saved — {platform_name.strip()} marked as "
+                       f"{tracker.STATUS_LABEL.get(status, status)}.")
+
+    stats = tracker.community_summary(site.key)
+    c.metric_row([
+        ("Planned", stats["planned"], tracker.COMMUNITY_STAGE_HELP["planned"]),
+        ("Submitted", stats["submitted"], tracker.COMMUNITY_STAGE_HELP["submitted"]),
+        ("Live", stats["live"], tracker.COMMUNITY_STAGE_HELP["live"]),
+    ])
+
+    board = tracker.community_board(site.key)
+    if board.empty:
+        st.caption("Nothing tracked yet. Fill in the form above once you've submitted "
+                   f"somewhere. The file is `{tracker.PATH}` — the same one both lanes "
+                   "write to.")
+        return
+
+    view = board.copy()
+    view["Status"] = view["stage"].map(tracker.STATUS_LABEL).fillna(view["stage"])
+    st.dataframe(
+        view[["platform", "Status", "target_url", "post_url", "updated", "detail"]]
+            .rename(columns={"platform": "Platform", "target_url": "Links to",
+                             "post_url": "Resulting URL", "updated": "Last change",
+                             "detail": "Note"}),
+        width="stretch", hide_index=True,
+    )
+
+    st.markdown("**Update one**")
+    st.caption("Move a submission along as it changes — planned → submitted → live.")
+    labels = [f"{row['platform']} → {row['target_url']} "
+              f"({tracker.STATUS_LABEL.get(row['stage'], row['stage'])})"
+              for _, row in board.iterrows()]
+    index = st.selectbox("Submission", options=list(range(len(board))),
+                         format_func=lambda i: labels[i], key="cm_board_pick")
+    row = board.iloc[index]
+
+    new_stage = st.radio(
+        "New status", options=tracker.COMMUNITY_STAGES,
+        index=tracker.COMMUNITY_STAGES.index(row["stage"])
+        if row["stage"] in tracker.COMMUNITY_STAGES else 0,
+        format_func=lambda s: tracker.STATUS_LABEL.get(s, s),
+        key="cm_board_stage", horizontal=True,
+    )
+    st.caption(tracker.COMMUNITY_STAGE_HELP.get(new_stage, ""))
+
+    cols3 = st.columns([3, 2])
+    board_note = cols3[0].text_input("Note (optional)", key="cm_board_note",
+                                     placeholder="e.g. front page for two hours")
+    board_url = cols3[1].text_input("Resulting URL", value=row["post_url"],
+                                    key="cm_board_url",
+                                    placeholder="https://reddit.com/r/.../comments/...")
+    if st.button("💾 Update this submission", type="primary", key="cm_board_save"):
+        tracker.log_community(site.key, row["target_url"], row["platform"], new_stage,
+                              detail=board_note.strip(), post_url=board_url.strip())
+        st.success(f"{row['platform']} → {tracker.STATUS_LABEL.get(new_stage, new_stage)}.")
+
+    st.download_button(
+        "⬇️ Export submissions (CSV)", board.to_csv(index=False).encode(),
+        file_name=f"{site.key}_community_submissions.csv", mime="text/csv",
+        key="cm_board_export",
     )
