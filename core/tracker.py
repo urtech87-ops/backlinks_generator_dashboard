@@ -3,14 +3,20 @@ The backlink tracker — a plain CSV in `data/`, so it survives restarts, opens
 in a spreadsheet, and is trivially auditable.
 
 One row per event (failures included — a link you *thought* you built is worse
-than one you know failed). Both lanes share this one file:
+than one you know failed). All three lanes share this one file:
 
-  lane="owned"  Lane A: one row per publish attempt to a platform you own.
-  lane="guest"  Lane B: one row per *stage change* for a guest-post prospect,
-                so the file is an append-only history — prospected → pitched →
-                accepted → live — and `guest_board()` folds it into the current
-                stage per prospect. For guest rows the `platform` column holds
-                the host's domain.
+  lane="owned"      Lane A: one row per publish attempt to a platform you own.
+  lane="guest"      Lane B: one row per *stage change* for a guest-post prospect,
+                    so the file is an append-only history — prospected → pitched →
+                    accepted → live — and `guest_board()` folds it into the current
+                    stage per prospect. For guest rows the `platform` column holds
+                    the host's domain.
+  lane="community"  A manual tracker for community/directory submissions (Reddit,
+                    Hacker News, Product Hunt, AlternativeTo, an "awesome" list...).
+                    Same append-only-history-folded-into-a-board shape as Lane B,
+                    but nothing here is ever posted anywhere — every row is typed
+                    in by hand. For community rows the `platform` column holds the
+                    platform/directory name.
 """
 
 import csv
@@ -28,11 +34,15 @@ FIELDS = ["logged_at", "site", "lane", "target_url", "platform", "status",
 
 LANE_OWNED = "owned"
 LANE_GUEST = "guest"
+LANE_COMMUNITY = "community"
 
 # The stages a guest prospect moves through, in order. "declined" is a real
 # outcome, not a failure — most pitches get one, and hiding them would make the
 # board lie about how outreach actually goes.
 GUEST_STAGES = ["prospected", "pitched", "accepted", "declined", "live"]
+
+# The stages a manual community/directory submission moves through.
+COMMUNITY_STAGES = ["planned", "submitted", "live"]
 
 # What the `status` column can say, in plain language for the UI.
 STATUS_LABEL = {
@@ -45,6 +55,9 @@ STATUS_LABEL = {
     "pitched": "Pitch sent — waiting",
     "accepted": "Accepted — host said yes",
     "declined": "Declined",
+    # Community tracker
+    "planned": "Planned",
+    "submitted": "Submitted — waiting",
 }
 
 GUEST_STAGE_HELP = {
@@ -54,6 +67,18 @@ GUEST_STAGE_HELP = {
     "declined": "A no, or no reply worth chasing. Keep it — it stops you pitching twice.",
     "live": "The host published it. The link exists.",
 }
+
+COMMUNITY_STAGE_HELP = {
+    "planned": "On your list. Nothing posted yet.",
+    "submitted": "You've posted or submitted it — waiting to see if it sticks.",
+    "live": "It's up: approved, live, or listed.",
+}
+
+# A starting point for the platform picker — free text is always allowed too.
+COMMUNITY_PLATFORM_PRESETS = [
+    "Reddit", "Hacker News", "Product Hunt", "AlternativeTo",
+    "An \"awesome\" list", "Other directory or community",
+]
 
 
 def _ensure_header() -> None:
@@ -91,8 +116,13 @@ def _ensure_header() -> None:
 
 def log(site_key: str, target_url: str, platform: str, status: str,
         post_url: str = "", title: str = "", detail: str = "",
-        lane: str = LANE_OWNED, contact: str = "") -> None:
-    """Append one row. Never raises — a tracker write must not lose a publish."""
+        lane: str = LANE_OWNED, contact: str = "", logged_at: str = "") -> None:
+    """
+    Append one row. Never raises — a tracker write must not lose a publish.
+
+    `logged_at` defaults to now; the community tracker passes a user-chosen
+    date instead, since a submission is often logged after the fact.
+    """
     try:
         PATH.parent.mkdir(parents=True, exist_ok=True)
         _ensure_header()
@@ -102,7 +132,7 @@ def log(site_key: str, target_url: str, platform: str, status: str,
             if new_file:
                 writer.writeheader()
             writer.writerow({
-                "logged_at": dt.datetime.now().isoformat(timespec="seconds"),
+                "logged_at": logged_at or dt.datetime.now().isoformat(timespec="seconds"),
                 "site": site_key,
                 "lane": lane,
                 "target_url": target_url,
@@ -139,6 +169,18 @@ def log_guest(site_key: str, target_url: str, domain: str, status: str,
     """
     log(site_key, target_url, domain, status, post_url=post_url, title=title,
         detail=detail, lane=LANE_GUEST, contact=contact)
+
+
+def log_community(site_key: str, target_url: str, platform: str, status: str,
+                   date: str = "", detail: str = "", post_url: str = "") -> None:
+    """
+    Record one community/directory submission or stage change (planned →
+    submitted → live). This is a pure log — nothing calls it except a human
+    filling in the form on the Backlinks page. `platform` is a name, not an
+    account: "Reddit", "Hacker News", "Product Hunt", an "awesome" list, etc.
+    """
+    log(site_key, target_url, platform, status, post_url=post_url,
+        detail=detail, lane=LANE_COMMUNITY, logged_at=date)
 
 
 def load(site_key: str = "", lane: str = "") -> pd.DataFrame:
@@ -250,6 +292,58 @@ def guest_summary(site_key: str = "") -> dict:
     """How many prospects sit in each stage right now, plus the total."""
     board = guest_board(site_key)
     counts = {stage: 0 for stage in GUEST_STAGES}
+    if not board.empty:
+        for stage, count in board["stage"].value_counts().items():
+            counts[stage] = int(count)
+    counts["total"] = int(len(board))
+    return counts
+
+
+# ── Community tracker: fold the history into one row per submission ────────
+def community_board(site_key: str = "") -> pd.DataFrame:
+    """
+    One row per (platform, target page) with its CURRENT stage, taken from the
+    newest row for that pair. Same fold as `guest_board()` — a submission can
+    move planned → submitted → live over several visits to the page, and this
+    is what turns that history into one line per submission.
+    """
+    columns = ["platform", "target_url", "stage", "post_url", "detail",
+               "first_seen", "updated"]
+    df = load(site_key, lane=LANE_COMMUNITY)
+    if df.empty:
+        return pd.DataFrame(columns=columns)
+
+    rows = []                                    # `df` is newest-first from load()
+    for (platform, target_url), group in df.groupby(["platform", "target_url"],
+                                                     sort=False):
+        newest = group.iloc[0]
+
+        def latest(col: str) -> str:
+            """The most recent non-empty value — an update needn't repeat it."""
+            values = [v for v in group[col].tolist() if str(v).strip()]
+            return str(values[0]) if values else ""
+
+        rows.append({
+            "platform": platform,
+            "target_url": target_url,
+            "stage": newest["status"],
+            "post_url": latest("post_url"),
+            "detail": str(newest["detail"]),
+            "first_seen": str(group.iloc[-1]["logged_at"]),
+            "updated": str(newest["logged_at"]),
+        })
+
+    board = pd.DataFrame(rows, columns=columns)
+    order = {stage: i for i, stage in enumerate(COMMUNITY_STAGES)}
+    board["_order"] = board["stage"].map(order).fillna(len(COMMUNITY_STAGES))
+    return (board.sort_values(["_order", "updated"], ascending=[True, False])
+                 .drop(columns="_order").reset_index(drop=True))
+
+
+def community_summary(site_key: str = "") -> dict:
+    """How many submissions sit in each stage right now, plus the total."""
+    board = community_board(site_key)
+    counts = {stage: 0 for stage in COMMUNITY_STAGES}
     if not board.empty:
         for stage, count in board["stage"].value_counts().items():
             counts[stage] = int(count)

@@ -5,9 +5,10 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-13 · **Current phase:** Phase 9 done — **a third site, honest
-ranking for it, and an active tracker**
-**Overall:** ▓▓▓▓▓▓▓▓▓ 100% (all nine phases shipped. Phase 7 made Overview the conductor;
+**Last updated:** 2026-09-14 · **Current phase:** Phase 10 done — **two more owned
+publishers, and a manual community/directory tracker**
+**Overall:** ▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, plus two small scoped
+additions — Phase 9 and Phase 10 — on top. Phase 7 made Overview the conductor;
 Phase 8 made it the *spine*: it is the landing page, it shows your pages ranked on the
 impressions they actually earn, and every row carries the three buttons that act on it —
 Build backlinks · Write article · Fix — each pre-filling the agent that does the job. A
@@ -249,6 +250,45 @@ quality content; backlinks are the visible target, not the engine.
       site still returns `[]`, and `link_history()` counts a live and a draft entry
       but skips a failed one for the same URL.
 
+- [x] **Phase 10 — Two more owned publishers + a manual community tracker** — another
+      small, scoped addition.
+      **`publishers/hashnode.py` and `publishers/medium.py`** join `PLATFORMS` in the
+      exact pattern of the other three: a `missing()` readiness check naming the exact
+      settings still empty, `publish()`, and a registry entry with its own drafting
+      style. Hashnode is GraphQL (`publishPost` live, `createDraft` for `as_draft`),
+      needs `HASHNODE_TOKEN` + `HASHNODE_PUBLICATION_ID`. Medium needs one
+      `MEDIUM_TOKEN`, looks up the author id from `/v1/me`, and uses Medium's own
+      `publishStatus: draft` for `as_draft` — its docstring and its `PublishResult`
+      detail both say plainly that Medium's API has no edit/delete endpoint, so a live
+      post can only be fixed on Medium's own site afterward. Both sets of keys are in
+      `.env.example` and `core/settings.py`'s **Owned backlink platforms** group, so
+      Settings renders them with no UI code of their own. WordPress stays draft-only;
+      `publishers.PLATFORMS` still has no third-party entry.
+      **`core/tracker.py` gained a third lane, `"community"`**, for manual
+      community/directory submissions (Reddit, Hacker News, Product Hunt,
+      AlternativeTo, an "awesome" list). It reuses Lane B's exact shape — an
+      append-only log (`log_community()`) folded into a current-stage-per-submission
+      board (`community_board()` / `community_summary()`), stages `planned →
+      submitted → live`. `log()` gained an optional `logged_at` override so a
+      submission can be dated when it actually happened, not just "now". Nothing in
+      this lane calls an API or reads the network — every row exists because a human
+      filled in a form and pressed Save, the same honesty rule as Lane B's send step.
+      **Backlinks page gained its own "🌐 Community & directory submissions" section**,
+      below both lanes (not nested in either tab): a form (target page — with an
+      optional picker from your own coverage pages — platform name from a short
+      preset list or free text, date, status, resulting URL, a note), a metric row,
+      the folded board, and an update-one-row flow mirroring Lane B's board step,
+      plus a CSV export.
+      *Note:* verified with the repo's own `core.tracker` (no stubbing needed — this
+      lane touches no network): `log_community()` correctly folds planned → submitted
+      for the same (platform, page) pair into one board row while a different page
+      stays a separate row, `community_summary()` counts land in the right stage, and
+      `pytest -q` (16/16, unchanged) plus a Streamlit `AppTest` pass driving the whole
+      form — fill in target/platform/status/note, press **Save submission**, see the
+      success message and the new row — with no exceptions. Not run against a real
+      Hashnode or Medium account: this environment has no platform keys, same as
+      dev.to and Blogger before it.
+
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
 - `core/` package: `config` (now readable *and* writable), `settings` (the option
@@ -435,6 +475,15 @@ quality content; backlinks are the visible target, not the engine.
   tool-over-article) instead of a tied score read out alphabetically.
 - **Phase 9 · `core/tracker.link_history()`** — count + most-recent-date of non-failed
   prior attempts at one URL, read by the Backlinks page's new "already linked" warning.
+- **Phase 10 · `publishers/hashnode.py` + `publishers/medium.py`** — two more owned
+  auto-publish destinations, registered in `publishers.PLATFORMS` alongside dev.to,
+  Blogger and WordPress. Medium's `publish()` and its Settings help text both flag
+  that the API can create a post but never edit or delete one.
+- **Phase 10 · `core/tracker`'s community lane** — `log_community()`,
+  `community_board()`, `community_summary()`, `COMMUNITY_STAGES`, and a `logged_at`
+  override on `log()` — a manual, no-network tracker for Reddit/HN/Product
+  Hunt/AlternativeTo/"awesome"-list submissions, shown as its own section on the
+  Backlinks page (`ui/views/backlinks.py::_community_section`).
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its
@@ -491,8 +540,9 @@ and its three buttons are built from. Run `pytest -q` before and after touching 
   repo, so the publishers were written from the platform API docs instead. Still worth
   dropping in: if its Blogger auth differs from the standard refresh-token exchange,
   swap `publishers/blogger.py → _access_token()` for the original.
-- Platform keys to actually switch Lane A on: dev.to API key, and/or the four Blogger
-  values (blog ID, client ID, client secret, refresh token).
+- Platform keys to actually switch Lane A on: dev.to API key, the four Blogger values
+  (blog ID, client ID, client secret, refresh token), a Hashnode personal access token
+  + publication ID, and/or a Medium integration token.
 - Email/SMTP for the optional guest-outreach send (else copy-paste pitches) — plus
   `OUTREACH_FROM_NAME`, which signs the pitch.
 - Optional: a search API key (Serper / SerpAPI / Brave) if DuckDuckGo throttles
