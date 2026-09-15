@@ -5,16 +5,17 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-14 · **Current phase:** Phase 11 done — **a plain-English
-"what this page needs" verdict on every ranked page**
-**Overall:** ▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, plus two small scoped
-additions — Phase 9 and Phase 10 — on top. Phase 7 made Overview the conductor;
-Phase 8 made it the *spine*: it is the landing page, it shows your pages ranked on the
-impressions they actually earn, and every row carries the three buttons that act on it —
-Build backlinks · Write article · Fix — each pre-filling the agent that does the job. A
-disconnected dashboard now says out loud that its numbers are SAMPLE data and offers the
-one button that changes that. What's left is not building — it's running the thing against
-real keys; see **First real run** below.)
+**Last updated:** 2026-09-15 · **Current phase:** Phase 12 done — **task wizards: the
+multi-step jobs are now one step at a time, not one dense page**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, three scoped additions —
+Phase 9, 10 and 11 — on top, and now Phase 12's UX redesign over the same engine. Phase 7
+made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a plain-English
+verdict on every ranked page. Phase 12 is the layer a non-SEO person actually needs:
+building a backlink, running guest outreach and writing an article are now step-by-step
+wizards with a "Step X of N" strip, one job per screen, and Next disabled until that step
+has actually produced something to carry forward. Nothing underneath changed — same
+agents, same guardrails, same data. What's left is not building — it's running the thing
+against real keys; see **First real run** below.)
 
 ---
 
@@ -538,6 +539,79 @@ quality content; backlinks are the visible target, not the engine.
       correctly-coloured badge and reason on every row, matching the same page's
       row in the Performance tab. `pytest -q` still 16/16 — this phase changed no
       existing behaviour, only added the verdict alongside it.
+
+- [x] **Phase 12 — Task wizards: guide a non-SEO user step by step** — a UX
+      redesign over the working engine, not a rewrite of it. The trigger: the
+      owner keeps forgetting how to use the tool and is handing it to a friend
+      with zero SEO background, and a dense multi-section page asks them to
+      hold five decisions in their head at once.
+      **`ui.components` gained the wizard kit** — `wizard_steps()` (the "Step X
+      of N" strip: every step named, done ones ticked, the current one
+      highlighted, a plain "Step X of N — <name>" caption underneath so it
+      reads with no colour at all), and `wizard_back()` / `wizard_next()` /
+      `wizard_restart()`, the buttons every wizard below is built from.
+      `wizard_next()` takes a `disabled` + `help` pair on purpose: a step can
+      only be walked past once it's actually produced something to carry
+      forward, and the reason why not is on screen, not just a greyed-out
+      button.
+      **Backlinks Lane A is now a 4-step wizard** — pick the page → choose
+      platforms → generate the draft → review & publish — replacing the one
+      page that used to show all four at once. Platform readiness moved into
+      a collapsed expander (open only when something's missing) instead of
+      always-on clutter above the wizard. Step 2 still won't let you past with
+      no platform configured; step 3 still won't let you past with no
+      OpenRouter key; step 4 is exactly the old review-and-publish screen,
+      now with a "🔁 Build another backlink" reset. The tracker stays below
+      the wizard as a standing record, not a wizard step.
+      **Backlinks Lane B is now the exact 5-stage wizard the brief asked
+      for** — pick target page → find prospects → choose a site → review the
+      drafted pitch + article → send/copy + track — where the old page
+      folded "choose a site" and "draft it" into one dense step. Step 5's
+      intro line says outright, in bold, that this is the one step a human
+      has to do by hand; nothing before it is reachable without a target
+      chosen first (jumping the step counter straight to step 3 with no
+      target bounces back to a warning, never a crash — see the test below).
+      **Content's writer path is now a 5-step wizard** — what's it about →
+      research & write → review & edit → images → publish — over the same
+      five sections Phase 5 already had, just one on screen at a time with
+      Next gated on the step before it actually finishing (a topic before
+      research, a draft before review, a draft before publish).
+      **Every wizard survives a stale step number.** Switching site, or
+      landing on a step via a stored hand-off, re-checks that step's own
+      precondition (a chosen target, a stored draft) and bounces back to a
+      plain warning rather than crashing on a `None` — proven directly in the
+      tests below by jumping `session_state`'s step key without ever visiting
+      step 1.
+      Nothing underneath moved: same `agents/backlink.py`, `agents/outreach.py`
+      and `agents/content.py` calls, same tracker, same guardrails
+      (WordPress always draft, Lane A owned-platforms-only, Lane B human-gated
+      send, no invented numbers). This phase only changed how much of the page
+      is on screen at once and in what order.
+      **Overview and the plain-language pass needed little new work** — Phase
+      8 already made Overview a prioritised, real-data "do this next" list
+      (the winners table's per-row verdict badge, reason and three action
+      buttons *is* item 2 of the brief), and Phase 8/11 already lead every
+      metric with its meaning before the raw number and glossary it in
+      `jargon_note()` / `legend()`. This phase's one small addition on top:
+      removed two headers that had gone double once their section was wrapped
+      in a same-titled expander (`_platform_readiness()`,
+      `_outreach_readiness()`).
+      *Note:* `tests/test_phase12_wizards.py` (14 new `AppTest` cases, all on
+      the sample snapshot — no credentials needed to drive any wizard): each
+      wizard starts on step 1 of the right total; Next/Back actually move the
+      step counter; Lane A's step 2 and step 3 refuse to advance without a
+      platform or an OpenRouter key and say so; Lane B names all five stages
+      and step 5 states the human-approval point in its own text; jumping
+      straight to Lane B step 3 or Content step 3 without the prior step's
+      state present bounces back to a warning instead of raising; both pages
+      still render with no wizard state at all. `pytest -q` — 30/30 (the
+      original 16 plus these 14) — the existing Phase 8 suite needed one
+      fix: Lane A's target-and-metrics step used to be visible regardless of
+      platform readiness, so gating the *whole wizard* on a platform being
+      configured (my first draft) hid the picker `test_build_backlinks_pre-
+      selects_the_page_on_the_backlinks_page` depends on. Fixed by moving the
+      "no platform configured" refusal to where it always belonged — step 2 —
+      leaving step 1's picker reachable exactly as before.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its
