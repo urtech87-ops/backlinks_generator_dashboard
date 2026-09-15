@@ -36,6 +36,11 @@ SKILLS = [
 ]
 
 
+CONTENT_STEPS = ["What's it about", "Research & write", "Review & edit", "Images",
+                 "Publish"]
+STEP_C = "content_step"
+
+
 def render(ctx) -> None:
     site = ctx.site
     c.page_header(
@@ -46,17 +51,29 @@ def render(ctx) -> None:
     st.info("**Quality over volume.** Thin AI pages are what got these pages rejected in "
             "the first place — the Fix Plan's orange bucket is the receipt. Every path "
             "here ends in a **draft** you review, never a live post.", icon="⚠️")
-
-    st.caption("The path is always the same: say what the article is about → the agent "
-               "researches it → you read and edit the draft → it's filed as a WordPress "
-               "**draft** for you to publish yourself.")
     c.jargon_note("Impressions", "Striking distance", "Indexed")
 
     coverage_df, _ = d.coverage_frame(site)
-    _readiness(site)
+    rows = _readiness_rows(site)
+    with st.expander("Readiness for this site",
+                     expanded=not all(r["state"] == "ok" for r in rows)):
+        c.status_rows(rows)
+        c.nav_button("Open Settings", "Settings", key="content_settings")
+
+    step = st.session_state.setdefault(STEP_C, 1)
+    c.wizard_steps(CONTENT_STEPS, step)
     st.divider()
 
-    _writer(ctx, coverage_df)
+    if step == 1:
+        _c_topic(ctx, coverage_df)
+    elif step == 2:
+        _c_research_write(ctx)
+    elif step == 3:
+        _c_review(ctx)
+    elif step == 4:
+        _c_images(ctx)
+    elif step == 5:
+        _c_publish(ctx)
 
     st.divider()
     _saved_runs()
@@ -65,8 +82,8 @@ def render(ctx) -> None:
     _quality_path()
 
 
-# ── The writer ─────────────────────────────────────────────────────────────
-def _writer(ctx, coverage_df) -> None:
+# ── Step 1: the topic ──────────────────────────────────────────────────────
+def _c_topic(ctx, coverage_df) -> None:
     site = ctx.site
 
     c.section("1 · What should this article be about?",
@@ -88,14 +105,14 @@ def _writer(ctx, coverage_df) -> None:
     )
 
     cols = st.columns(2)
-    keyword = cols[0].text_input(
+    cols[0].text_input(
         "Primary keyword (optional)", key="content_keyword",
         placeholder="e.g. compress jpeg without losing quality",
         help="Leave blank and the agent picks the phrase it thinks people search for. "
              "Or fill it from your own Search Console data with the keyword engine "
              "below.",
     )
-    notes = cols[1].text_input(
+    cols[1].text_input(
         "Anything the writer should know (optional)", key="content_notes",
         placeholder="e.g. aimed at photographers, mention batch processing",
         help="Free text passed to the model — an angle, an audience, a use-case.",
@@ -105,7 +122,7 @@ def _writer(ctx, coverage_df) -> None:
 
     options = agent.internal_link_options(coverage_df, site)
     if options:
-        picked = st.multiselect(
+        st.multiselect(
             "Pages this article should link to", options=[o["url"] for o in options],
             default=[o["url"] for o in options[:4]],
             format_func=lambda u: next((o["page"] for o in options if o["url"] == u), u),
@@ -113,38 +130,68 @@ def _writer(ctx, coverage_df) -> None:
             help="Only indexed pages are offered. Linking a new article to a page Google "
                  "has already rejected spreads the problem instead of fixing it.",
         )
-        internal = [o for o in options if o["url"] in picked]
     else:
-        internal = []
         st.caption("No indexed pages to link to yet, so the article will link to your "
                    "homepage only. Clear the Fix Plan and they'll appear here.")
 
     st.write("")
+    _, next_col, _ = st.columns([1, 1, 3])
+    with next_col:
+        c.wizard_next(STEP_C, 1, len(CONTENT_STEPS), disabled=not topic.strip(),
+                      help="Enter a topic first." if not topic.strip() else "",
+                      label="Research & write →")
+
+
+# ── Step 2: research + write ────────────────────────────────────────────────
+def _c_research_write(ctx) -> None:
+    site = ctx.site
+    topic = st.session_state.get("content_topic", "")
+    keyword = st.session_state.get("content_keyword", "")
+    notes = st.session_state.get("content_notes", "")
+
     c.section("2 · Research it, then write it",
               f"Research runs through your search provider "
               f"(`{search.PROVIDERS[search.provider()]}`); the article is written by "
-              f"`{config.get('CONTENT_MODEL', 'no model set')}`.")
+              f"`{config.get('CONTENT_MODEL', 'no model set')}` for the topic "
+              f"“{topic}”." if topic else "Go back and enter a topic first.")
+
+    if not topic.strip():
+        c.wizard_back(STEP_C, 2)
+        return
 
     if not config.is_set("OPENROUTER_API_KEY"):
         st.warning("No OpenRouter key saved, so nothing can be written yet.", icon="🔑")
         c.nav_button("Add an OpenRouter key", "Settings", key="content_key")
+        c.wizard_back(STEP_C, 2)
         return
 
-    if st.button("🔎 Research and write the draft", type="primary", key="content_write",
-                 disabled=not topic.strip()):
+    if st.button("🔎 Research and write the draft", type="primary", key="content_write"):
+        coverage_df, _ = d.coverage_frame(site)
+        options = agent.internal_link_options(coverage_df, site)
+        picked = st.session_state.get("content_internal", [o["url"] for o in options[:4]])
+        internal = [o for o in options if o["url"] in picked]
         _run(site, topic, keyword, notes, internal)
 
     run = st.session_state.get(RUN) or {}
-    if not run.get("draft") or run.get("site") != site.key:
-        st.caption("Nothing drafted yet. Enter a topic above and press the button.")
-        return
+    has_draft = bool(run.get("draft")) and run.get("site") == site.key
+    if has_draft:
+        if run.get("topic") != topic.strip():
+            st.info(f"The draft ready below is for “{run['topic']}”, not the topic now "
+                    "in the box. Press the button again to write the new one.")
+        else:
+            _research_summary(run["research"])
+            st.success("Draft ready — continue to read and edit it.", icon="✅")
+    else:
+        st.caption("Nothing drafted yet. Press the button above.")
 
-    if run.get("topic") != topic.strip() and topic.strip():
-        st.info(f"The draft below is for “{run['topic']}”, not the topic now in the box. "
-                "Press the button again to write the new one.")
-
-    _research_summary(run["research"])
-    _review(site, run)
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_C, 2)
+    with next_col:
+        c.wizard_next(STEP_C, 2, len(CONTENT_STEPS), disabled=not has_draft,
+                      help="Write the draft first." if not has_draft else "",
+                      label="Review & edit →")
 
 
 def _keyword_helper(ctx, topic: str) -> None:
@@ -239,11 +286,16 @@ def _research_summary(research) -> None:
                     st.caption(s["snippet"])
 
 
-# ── Review, images, publish ────────────────────────────────────────────────
-def _review(site, run: dict) -> None:
+# ── Step 3: review + edit ───────────────────────────────────────────────────
+def _c_review(ctx) -> None:
+    site = ctx.site
+    run = st.session_state.get(RUN) or {}
+    if not run.get("draft") or run.get("site") != site.key:
+        st.warning("Nothing drafted yet — go back and write the draft first.")
+        c.wizard_back(STEP_C, 3)
+        return
     draft = run["draft"]
 
-    st.divider()
     c.section("3 · Read it before anyone else does",
               "These checks are the writer skill's rules, applied to what the model "
               "actually produced. Edit anything — what's in these boxes is what gets "
@@ -304,12 +356,34 @@ def _review(site, run: dict) -> None:
             st.caption("No sources cited. A sourced figure is the single biggest lift for "
                        "being quoted by AI engines — worth a rerun once research works.")
 
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_C, 3)
+    with next_col:
+        c.wizard_next(STEP_C, 3, len(CONTENT_STEPS), label="Images →")
+
+
+# ── Step 4: images ───────────────────────────────────────────────────────────
+def _c_images(ctx) -> None:
+    site = ctx.site
+    run = st.session_state.get(RUN) or {}
+    if not run.get("draft") or run.get("site") != site.key:
+        st.warning("Nothing drafted yet — go back and write the draft first.")
+        c.wizard_back(STEP_C, 4)
+        return
+
     _images(run)
-    _publish(site, run, rows)
+
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_C, 4)
+    with next_col:
+        c.wizard_next(STEP_C, 4, len(CONTENT_STEPS), label="Publish →")
 
 
 def _images(run: dict) -> None:
-    st.divider()
     c.section("4 · Images", image_api.status())
 
     if st.button("🖼️ Make the images", key="content_images"):
@@ -334,8 +408,28 @@ def _images(run: dict) -> None:
                    "and with no image API you get briefs rather than a blocked run.")
 
 
+# ── Step 5: publish ──────────────────────────────────────────────────────────
+def _c_publish(ctx) -> None:
+    site = ctx.site
+    run = st.session_state.get(RUN) or {}
+    if not run.get("draft") or run.get("site") != site.key:
+        st.warning("Nothing drafted yet — go back and write the draft first.")
+        c.wizard_back(STEP_C, 5)
+        return
+
+    rows = agent.check(run["draft"], run["research"], site)
+    _publish(site, run, rows)
+
+    st.write("")
+    back_col, restart_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_C, 5)
+    with restart_col:
+        c.wizard_restart(STEP_C, "🔁 Write another article", target_step=1,
+                         clear_keys=[RUN])
+
+
 def _publish(site, run: dict, rows: list) -> None:
-    st.divider()
     c.section("5 · File it as a WordPress draft",
               "Always a draft. Nothing on this page can publish a live post.")
 
@@ -445,12 +539,6 @@ def _quality_path() -> None:
         st.markdown("Ask Claude Code: **“run the content agent on <your topic>”**")
         for name, what in SKILLS:
             st.markdown(f"- `{name}` — {what}")
-
-
-def _readiness(site: config.Site) -> None:
-    c.section("Readiness for this site", "What the content path has, and what it's missing.")
-    c.status_rows(_readiness_rows(site))
-    c.nav_button("Open Settings", "Settings", key="content_settings")
 
 
 def _readiness_rows(site: config.Site) -> list:

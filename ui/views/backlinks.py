@@ -84,7 +84,13 @@ def render(ctx) -> None:
     _community_section(ctx, df)
 
 
-# ── Lane A ─────────────────────────────────────────────────────────────────
+# ── Lane A: a 4-step wizard — pick the page, choose platforms, generate, ───
+# ── review + publish. One step on screen at a time (Phase 12). ─────────────
+LANE_A_STEPS = ["Pick the page", "Choose platforms", "Generate the draft",
+               "Review & publish"]
+STEP_A = "bl_step_a"
+
+
 def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
     site = ctx.site
 
@@ -93,13 +99,9 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
             "always created as drafts, and nothing is ever posted to someone else's "
             "site in this lane.", icon="🛡️")
 
-    _platform_readiness(site)
-    st.divider()
-
-    # ── Step 1: the page that deserves a link ──────────────────────────────
-    c.section("1 · Pick the page you want links to",
-              "Ranked by where a link does the most good. Broken and quality-rejected "
-              "pages are left out on purpose — a link to those is wasted.")
+    ready_now = [k for k, p in PLATFORMS.items() if not p.missing(site)]
+    with st.expander("Platform readiness", expanded=not ready_now):
+        _platform_readiness(site)
 
     targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end)
     if not targets:
@@ -116,6 +118,34 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
             icon="🔗",
         )
         return
+
+    step = st.session_state.setdefault(STEP_A, 1)
+    c.wizard_steps(LANE_A_STEPS, step)
+    st.divider()
+
+    if step == 1:
+        _a_pick_target(ctx, targets, rank_source)
+    elif step == 2:
+        _a_choose_platforms(site, ready_now)
+    elif step == 3:
+        _a_generate(site, targets)
+    elif step == 4:
+        _a_review_and_publish(site)
+
+    st.divider()
+    _tracker_section(site)
+
+
+def _a_target(targets: list):
+    """The page picked in step 1, read back from the selectbox's own state."""
+    idx = st.session_state.get("bl_target_pick")
+    return targets[idx] if idx is not None and idx < len(targets) else None
+
+
+def _a_pick_target(ctx, targets: list, rank_source: str) -> None:
+    c.section("1 · Pick the page you want links to",
+              "Ranked by where a link does the most good. Broken and quality-rejected "
+              "pages are left out on purpose — a link to those is wasted.")
 
     if rank_source == "live":
         st.caption("Ranked on live Search Console impressions and average position for "
@@ -152,7 +182,7 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
     with st.container(border=True):
         st.markdown(f"**{target.url}**")
         st.caption(target.reason)
-        _link_history_warning(site, target)
+        _link_history_warning(ctx.site, target)
         if target.has_metrics:
             c.metric_row([
                 ("Clicks", target.clicks, "Visits Google sent this page in the "
@@ -179,30 +209,37 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
             width="stretch", hide_index=True,
         )
 
-    st.divider()
+    st.write("")
+    _, next_col, _ = st.columns([1, 1, 3])
+    with next_col:
+        c.wizard_next(STEP_A, 1, len(LANE_A_STEPS), label="Choose platforms →")
 
-    # ── Step 2: where to publish ───────────────────────────────────────────
+
+def _a_choose_platforms(site, available: list) -> None:
     c.section("2 · Choose where to publish",
               "Only platforms you own, and only the ones whose keys are saved.")
 
-    available = [k for k, p in PLATFORMS.items() if not p.missing(site)]
     if not available:
         st.warning("None of your platforms are set up yet. Add a dev.to API key, your "
                    "Blogger details, or a WordPress application password in Settings.",
                    icon="🔑")
-        c.nav_button("Open Settings", "Settings", key="bl_settings_step2")
+        settings_col, back_col, _ = st.columns([1, 1, 3])
+        with settings_col:
+            c.nav_button("Open Settings", "Settings", key="bl_settings_step2")
+        with back_col:
+            c.wizard_back(STEP_A, 2)
         return
 
     chosen = st.multiselect(
         "Publish to", options=available,
-        default=available[:1],
+        default=st.session_state.get("bl_platforms") or available[:1],
         format_func=lambda k: PLATFORMS[k].label,
         key="bl_platforms",
         help="One article is written per platform, tailored to that audience — the same "
              "text posted twice is duplicate content and helps nobody.",
     )
 
-    notes = st.text_input(
+    st.text_input(
         "Anything the writer should know (optional)",
         key="bl_notes", placeholder="e.g. focus on the CSV export use-case",
         help="Free text passed to the model — an angle, a use-case, an audience detail.",
@@ -210,16 +247,35 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
     st.caption("Leave it blank and the writer works from the target page's own title "
                "and description.")
 
-    st.divider()
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_A, 2)
+    with next_col:
+        c.wizard_next(STEP_A, 2, len(LANE_A_STEPS), disabled=not chosen,
+                      help="Pick at least one platform first." if not chosen else "",
+                      label="Generate the draft →")
 
-    # ── Step 3: draft ──────────────────────────────────────────────────────
+
+def _a_generate(site, targets: list) -> None:
+    target = _a_target(targets)
+    if target is None:
+        st.warning("Go back and pick a page first.")
+        c.wizard_back(STEP_A, 3)
+        return
+
+    chosen = st.session_state.get("bl_platforms") or []
+    notes = st.session_state.get("bl_notes", "")
+
     c.section("3 · Generate the draft",
-              f"Written by your backlink model (`{config.get('BACKLINK_MODEL', 'not set')}`). "
+              f"Written by your backlink model (`{config.get('BACKLINK_MODEL', 'not set')}`) "
+              f"for **{target.page}**, on {', '.join(PLATFORMS[k].label for k in chosen)}. "
               "You read it before anything is published.")
 
     if not config.is_set("OPENROUTER_API_KEY"):
         st.warning("No OpenRouter key saved, so nothing can be drafted yet.", icon="🔑")
         c.nav_button("Add an OpenRouter key", "Settings", key="bl_settings_key")
+        c.wizard_back(STEP_A, 3)
         return
 
     if st.button("✍️ Write the articles", type="primary", key="bl_generate",
@@ -250,17 +306,39 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
             st.error(problem)
 
     drafts = st.session_state.get(DRAFTS) or {}
+    ready = bool(drafts.get("items")) and drafts.get("site") == site.key \
+        and drafts.get("target_url") == target.url
+    if ready:
+        st.success(f"{len(drafts['items'])} draft(s) ready to read.", icon="✅")
+    else:
+        st.caption("Nothing drafted yet. Press the button above.")
+
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_A, 3)
+    with next_col:
+        c.wizard_next(STEP_A, 3, len(LANE_A_STEPS), disabled=not ready,
+                      help="Write the articles first." if not ready else "",
+                      label="Review & publish →")
+
+
+def _a_review_and_publish(site) -> None:
+    drafts = st.session_state.get(DRAFTS) or {}
     if not drafts.get("items") or drafts.get("site") != site.key:
-        st.caption("Nothing drafted yet. Pick your platforms above and press the button.")
-        _tracker_section(site)
+        st.warning("Nothing drafted yet — go back and generate a draft first.")
+        c.wizard_back(STEP_A, 4)
         return
 
-    if drafts["target_url"] != target.url:
-        st.info(f"These drafts link to `{drafts['target_url']}`, not the page selected "
-                "above. Press **Write the articles** again to draft for the new target.")
-
     _review_and_publish(site, drafts)
-    _tracker_section(site)
+
+    st.write("")
+    back_col, restart_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_A, 4)
+    with restart_col:
+        c.wizard_restart(STEP_A, "🔁 Build another backlink", target_step=1,
+                         clear_keys=[DRAFTS, RESULTS])
 
 
 def _target_keywords(ctx, target) -> None:
@@ -378,8 +456,7 @@ def _review_and_publish(site, drafts: dict) -> None:
 
 def _platform_readiness(site) -> None:
     """One row per owned platform, naming the exact settings still missing."""
-    c.section("Platform readiness", "Auto-publishing is only ever allowed on platforms "
-                                    "you own.")
+    st.caption("Auto-publishing is only ever allowed on platforms you own.")
     rows = []
     for platform in PLATFORMS.values():
         gaps = platform.missing(site)
@@ -455,6 +532,11 @@ _STAGE_STATE = {"prospected": "idle", "pitched": "warn", "accepted": "ok",
 _VERDICT_ICON = {out.WORTH: "🟢", out.MAYBE: "🟡", out.SKIP: "🔴"}
 
 
+LANE_B_STEPS = ["Pick target page", "Find prospects", "Choose a site",
+               "Review pitch + article", "Send & track"]
+STEP_B = "bl_step_b"
+
+
 def _lane_b(ctx, coverage_df: pd.DataFrame) -> None:
     site = ctx.site
 
@@ -464,24 +546,42 @@ def _lane_b(ctx, coverage_df: pd.DataFrame) -> None:
             "keyword-stuffed campaigns — that's exactly what Google penalises.",
             icon="🛡️")
 
-    _outreach_readiness()
+    ready = search.missing() == [] and config.is_set("OPENROUTER_API_KEY")
+    with st.expander("What's ready", expanded=not ready):
+        _outreach_readiness()
+
+    step = st.session_state.setdefault(STEP_B, 1)
+    c.wizard_steps(LANE_B_STEPS, step)
     st.divider()
 
-    target = _lane_b_target(ctx, coverage_df)
+    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end)
+    target = _b_target(targets)
+
+    if step == 1:
+        _b_pick_target(ctx, targets, rank_source)
+        return  # step 1 has no earlier state to fall back to
+
     if target is None:
+        st.warning("Go back and pick the page this outreach should link to first.")
+        c.wizard_back(STEP_B, step)
         return
 
-    st.divider()
-    _prospect_step(site, target)
+    if step == 2:
+        _b_find_prospects(site, target)
+    elif step == 3:
+        _b_choose_site(site, target)
+    elif step == 4:
+        _b_draft(site, target)
+    elif step == 5:
+        _b_send_and_track(site, target)
 
-    st.divider()
-    prospect = _draft_step(site, target)
 
-    st.divider()
-    _approval_step(site, target, prospect)
-
-    st.divider()
-    _board_step(site)
+def _b_target(targets: list):
+    """The page picked in step 1, read back by URL (steps can be revisited)."""
+    url = st.session_state.get("gb_target_url", "")
+    if not url:
+        return None
+    return next((t for t in targets if t.url == url), None)
 
 
 def _stage_map(site, target) -> dict:
@@ -495,8 +595,7 @@ def _stage_map(site, target) -> dict:
 
 def _outreach_readiness() -> None:
     """What's switched on, and what each missing piece actually costs you."""
-    c.section("What's ready", "Outreach works with none of this set up — you just do "
-                              "more of it by hand.")
+    st.caption("Outreach works with none of this set up — you just do more of it by hand.")
     rows = [
         ("Prospect search", not search.missing(),
          f"Searching with {search.PROVIDERS[search.provider()]}."
@@ -520,14 +619,12 @@ def _outreach_readiness() -> None:
 
 
 # ── Step 1: the page the guest post should link to ─────────────────────────
-def _lane_b_target(ctx, coverage_df: pd.DataFrame):
+def _b_pick_target(ctx, targets: list, rank_source: str) -> None:
     """Same ranking Lane A uses — a guest post to a broken page is wasted too."""
-    site = ctx.site
     c.section("1 · Pick the page the guest post should link to",
               "The same ranking Lane A uses. A hard-won guest link pointing at a page "
               "Google won't index is the most expensive way to earn nothing.")
 
-    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end)
     if not targets:
         c.empty_state(
             "No link-eligible pages yet",
@@ -540,7 +637,7 @@ def _lane_b_target(ctx, coverage_df: pd.DataFrame):
             ],
             icon="🅱️",
         )
-        return None
+        return
 
     if rank_source != "live":
         st.caption("⚠️ No Search Console performance data for this range, so this is the "
@@ -554,13 +651,32 @@ def _lane_b_target(ctx, coverage_df: pd.DataFrame):
         help="Every pitch and draft below is written around this page.",
     )
     target = targets[choice]
+    st.session_state["gb_target_url"] = target.url
     with st.container(border=True):
         st.markdown(f"**{target.url}**")
         st.caption(target.reason)
-    return target
+
+    st.write("")
+    _, next_col, _ = st.columns([1, 1, 3])
+    with next_col:
+        c.wizard_next(STEP_B, 1, len(LANE_B_STEPS), label="Find prospects →")
 
 
 # ── Step 2: find and score prospects ───────────────────────────────────────
+def _b_find_prospects(site, target) -> None:
+    _prospect_step(site, target)
+
+    known = _known_prospects(site, target)
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_B, 2)
+    with next_col:
+        c.wizard_next(STEP_B, 2, len(LANE_B_STEPS), disabled=not known,
+                      help="Find or add at least one prospect first." if not known else "",
+                      label="Choose a site →")
+
+
 def _default_niche(site, target) -> str:
     """A starting point for the niche box, from the page you picked."""
     words = target.page.strip("/").replace("-", " ").replace("_", " ").replace("/", " ")
@@ -736,15 +852,16 @@ def _known_prospects(site, target) -> dict:
     return found
 
 
-def _draft_step(site, target):
-    c.section("3 · Draft the pitch and the article",
-              f"Written by your backlink model (`{config.get('BACKLINK_MODEL', 'not set')}`) "
-              "for this one site. You edit both before anything is sent.")
+def _b_choose_site(site, target) -> None:
+    c.section("3 · Choose which site to pitch",
+              "Pick one of the sites you found or added. The next step writes a pitch "
+              "and an article for this one site only.")
 
     known = _known_prospects(site, target)
     if not known:
-        st.caption("Find or add a prospect first, then come back here.")
-        return None
+        st.caption("Nothing to choose from yet — go back and find or add a prospect.")
+        c.wizard_back(STEP_B, 3)
+        return
 
     domains = sorted(known)
     stages = _stage_map(site, target)
@@ -757,10 +874,48 @@ def _draft_step(site, target):
     )
     prospect = known[domain]
 
+    with st.container(border=True):
+        st.markdown(f"**{_VERDICT_ICON.get(prospect.verdict, '')} {domain}** · "
+                    f"{prospect.score}/100 · {prospect.verdict}")
+        if prospect.url:
+            st.markdown(f"[{prospect.url}]({prospect.url})")
+        for warning in prospect.warnings:
+            st.warning(warning, icon="⚠️")
+        for reason in prospect.reasons:
+            st.markdown(f"- {reason}")
+        st.caption(f"Contact: `{prospect.contact}`" if prospect.contact else
+                   "No email on the page — check for a contact form, or find the "
+                   "editor yourself before pitching.")
+
     if prospect.verdict == out.SKIP and prospect.warnings:
         st.error(f"This one scored {prospect.score}/100 and was marked **skip**: "
                  f"{prospect.warnings[0]} You can still draft for it, but read that "
                  "line again first.", icon="🚫")
+    if stages.get(domain) in ("pitched", "accepted", "live"):
+        st.info(f"You've already pitched {domain} for this page — it's at "
+                f"*{tracker.STATUS_LABEL.get(stages[domain], stages[domain])}*.",
+                icon="📌")
+
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_B, 3)
+    with next_col:
+        c.wizard_next(STEP_B, 3, len(LANE_B_STEPS), label="Draft pitch + article →")
+
+
+def _b_draft(site, target) -> None:
+    known = _known_prospects(site, target)
+    domain = st.session_state.get("gb_pitch_pick")
+    if not domain or domain not in known:
+        st.warning("Go back and choose which site to pitch first.")
+        c.wizard_back(STEP_B, 4)
+        return
+    prospect = known[domain]
+
+    c.section("4 · Draft the pitch and the article",
+              f"Written by your backlink model (`{config.get('BACKLINK_MODEL', 'not set')}`) "
+              f"for **{domain}**. You edit both before anything is sent.")
 
     angle = st.text_input(
         "The angle, if the host already agreed one (optional)", key="gb_angle",
@@ -815,7 +970,16 @@ def _draft_step(site, target):
 
     _pitch_editor(site, target, domain)
     _article_editor(site, target, domain)
-    return prospect
+
+    have_pitch = bool(_for_this(PITCH, site, target, domain))
+    st.write("")
+    back_col, next_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_B, 4)
+    with next_col:
+        c.wizard_next(STEP_B, 4, len(LANE_B_STEPS), disabled=not have_pitch,
+                      help="Write the pitch first." if not have_pitch else "",
+                      label="Send / track →")
 
 
 def _key(name: str, domain: str) -> str:
@@ -891,11 +1055,31 @@ def _article_editor(site, target, domain: str) -> None:
                  "for you.")
 
 
-# ── Step 4: approve and send ───────────────────────────────────────────────
+# ── Step 5: approve and send ────────────────────────────────────────────────
+def _b_send_and_track(site, target) -> None:
+    known = _known_prospects(site, target)
+    domain = st.session_state.get("gb_pitch_pick")
+    prospect = known.get(domain)
+
+    c.section("5 · Send it, then track it",
+              "**This is the one outbound action in the whole lane, and the only step "
+              "a human has to do.** Everything before this was reading and drafting; "
+              "nothing goes anywhere until you send it below — or tell the tracker "
+              "you sent it yourself.")
+    _approval_step(site, target, prospect)
+
+    st.divider()
+    _board_step(site)
+
+    st.write("")
+    back_col, restart_col, _ = st.columns([1, 1, 3])
+    with back_col:
+        c.wizard_back(STEP_B, 5)
+    with restart_col:
+        c.wizard_restart(STEP_B, "🔁 Pitch another site", target_step=3)
+
+
 def _approval_step(site, target, prospect) -> None:
-    c.section("4 · Approve and send",
-              "The one outbound action in this lane. One pitch, one click, after "
-              "you've read it.")
     if prospect is None:
         st.caption("Nothing to send yet.")
         return

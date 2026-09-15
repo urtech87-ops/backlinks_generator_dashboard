@@ -246,3 +246,73 @@ def legend(title: str, items: list) -> None:
     with st.expander(title):
         for icon, label, explanation in items:
             st.markdown(f"{icon} **{label}** — {explanation}")
+
+
+# ── Phase 12: task wizards ──────────────────────────────────────────────────
+# The multi-step jobs — build a backlink, run guest outreach, write an article —
+# used to be one dense page each. A wizard shows exactly one step at a time,
+# says in plain English what this step is for, and only the controls for that
+# step are on screen. `wizard_steps()` draws the "Step X of N" strip every
+# wizard uses; `wizard_back()` / `wizard_next()` are the buttons that move
+# between them. Each wizard keeps its own current-step number in
+# `st.session_state[step_key]` — nothing here is shared across wizards.
+def wizard_steps(labels: list, current: int) -> None:
+    """
+    The progress strip at the top of every wizard: one column per step, done
+    steps ticked, the current one highlighted, the rest greyed out — plus a
+    plain "Step X of N — <this step's name>" line underneath so it reads
+    without the colour.
+    """
+    n = len(labels)
+    cols = st.columns(n)
+    for i, (col, label) in enumerate(zip(cols, labels), 1):
+        with col:
+            if i < current:
+                mark, color = "✓", OK
+            elif i == current:
+                mark, color = "●", WARN
+            else:
+                mark, color = str(i), IDLE
+            weight = "700" if i == current else "500"
+            st.markdown(
+                f"<div style='text-align:center;font-size:0.8rem;color:{color};"
+                f"font-weight:{weight}'>{mark}<br>{label}</div>",
+                unsafe_allow_html=True,
+            )
+    st.progress(current / n)
+    st.caption(f"**Step {current} of {n} — {labels[current - 1]}**")
+
+
+def wizard_back(step_key: str, current: int, label: str = "← Back") -> None:
+    """The button that moves a wizard one step back. Draws nothing on step 1."""
+    if current > 1:
+        st.button(label, key=f"{step_key}_back", width="stretch",
+                  on_click=lambda: st.session_state.update({step_key: current - 1}))
+
+
+def wizard_next(step_key: str, current: int, total: int, *, disabled: bool = False,
+                help: str = "", label: str = "Next →", type: str = "primary") -> None:
+    """
+    The button that moves a wizard one step forward. Draws nothing on the last
+    step — the last step gets its own finishing action instead (publish, send).
+    Disable it (and say why in `help`) until this step's job is actually done,
+    so a wizard can't be walked past a step that has nothing to carry forward.
+    """
+    if current < total:
+        st.button(label, key=f"{step_key}_next", type=type, disabled=disabled,
+                  help=help, width="stretch",
+                  on_click=lambda: st.session_state.update({step_key: current + 1}))
+
+
+def wizard_restart(step_key: str, label: str, target_step: int = 1,
+                   clear_keys: list | None = None) -> None:
+    """
+    "Do this again" — jumps a finished wizard back to an earlier step (usually
+    1) and optionally clears the state that held the last run's result, so the
+    wizard doesn't show stale output while you start a new one.
+    """
+    def _go():
+        st.session_state[step_key] = target_step
+        for key in (clear_keys or []):
+            st.session_state.pop(key, None)
+    st.button(label, key=f"{step_key}_restart", width="stretch", on_click=_go)
