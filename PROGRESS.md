@@ -5,17 +5,17 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-15 · **Current phase:** Phase 12 done — **task wizards: the
-multi-step jobs are now one step at a time, not one dense page**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, three scoped additions —
-Phase 9, 10 and 11 — on top, and now Phase 12's UX redesign over the same engine. Phase 7
+**Last updated:** 2026-09-15 · **Current phase:** Phase 11-fix done — **a correctness bug:
+indexed pages were reading as "Not indexed"**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, four scoped additions —
+Phase 9, 10, 11 and the Phase 11-fix below — on top of Phase 12's UX redesign. Phase 7
 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a plain-English
-verdict on every ranked page. Phase 12 is the layer a non-SEO person actually needs:
-building a backlink, running guest outreach and writing an article are now step-by-step
-wizards with a "Step X of N" strip, one job per screen, and Next disabled until that step
-has actually produced something to carry forward. Nothing underneath changed — same
-agents, same guardrails, same data. What's left is not building — it's running the thing
-against real keys; see **First real run** below.)
+verdict on every ranked page; Phase 11-fix made that verdict honest when the underlying
+check is missing or fails, instead of silently lying. Phase 12 is the layer a non-SEO
+person actually needs: building a backlink, running guest outreach and writing an article
+are step-by-step wizards with a "Step X of N" strip, one job per screen, and Next disabled
+until that step has actually produced something to carry forward. What's left is not
+building — it's running the thing against real keys; see **First real run** below.)
 
 ---
 
@@ -612,6 +612,99 @@ quality content; backlinks are the visible target, not the engine.
       selects_the_page_on_the_backlinks_page` depends on. Fixed by moving the
       "no platform configured" refusal to where it always belonged — step 2 —
       leaving step 1's picker reachable exactly as before.
+
+- [x] **Phase 11-fix — Every page was reading "Not indexed", even indexed ones**
+      — a critical correctness bug, reported live against toolshall.com (143
+      pages actually indexed in Search Console, real GA4/GSC traffic in
+      range) where the Analysis > Performance tab showed **every** page as
+      "Not indexed — fix indexing first". Diagnosis, then fix.
+      **Root cause (confirmed by reading the code, not guessed):** a missing
+      or failed indexing check was silently read as a confirmed "no", in two
+      places at once. (1) `ui/views/analysis.py::_with_verdicts()` decided
+      "indexed" by set membership in `coverage_df` and defaulted straight to
+      `False` for any page missing from it — which is *every* page on a
+      fresh session for a site with no seed fallback: `core/seed.py`'s
+      `SEED_BY_SITE` only lists `"toolsvenue"`, so ToolsHall starts from an
+      **empty** coverage frame until "Refresh live data" is pressed, no
+      matter what the live Search Console Performance API (queried
+      separately, and successfully — hence the real clicks/impressions the
+      report described) says. (2) `agents/analysis.py::page_verdict()`'s
+      `indexed` parameter was a plain bool, so "never checked" and "Google
+      confirmed not indexed" were the same value. (3) Compounding it:
+      `core/gsc.py::inspect_urls()` discarded the per-URL `error` that
+      `inspect_url()` already captured, so even a full URL Inspection sweep
+      that failed for every URL (auth/quota/a property-URL mismatch) came
+      back as coverage `""` for every row with the failure invisible, and
+      `ui/data.py::refresh_live()` reported that as a plain success
+      ("Loaded live coverage for N URLs" 🟢) — this environment has never
+      had a Google key to confirm which specific failure mode hit
+      toolshall.com, but the code path is real and reproducible either way,
+      independent of *why* the check came back empty.
+      **The fix:** `indexed` is now a genuine tri-state everywhere it's
+      decided or consumed — `True` / `False` / `None`, never a bool that
+      collapses "unknown" into "no". A new classifier bucket,
+      `core.classifier.UNKNOWN` ("Couldn't check"), carries a real
+      inspection failure without it being folded into Plumbing/Content/Other;
+      it's matched first in `_COVERAGE_MAP` (before any "not indexed"-style
+      text) so an error message that happens to contain "404" is never
+      mistaken for Google's own verdict. `page_verdict()` gained a sixth
+      state, **`V_UNCHECKED` ("Couldn't check yet", 🩺)**, returned whenever
+      `indexed is None`, with a reason that says outright this is not a
+      confirmed "not indexed". `PageStat.indexed` returns `None` for the
+      `UNKNOWN` bucket instead of `False`. `gsc.inspect_urls()` now returns
+      `[(url, coverage, error), ...]` instead of dropping `error`, and
+      `ui/data.py::refresh_live()` stores failed URLs as `"Couldn't check:
+      <error>"` rows (so the Fix Plan shows the real error) and — the actual
+      honesty fix — **stops reporting a 100%-failed refresh as a success**:
+      `row_count` now counts only URLs Search Console actually answered for,
+      so a total failure correctly returns `(0, "…couldn't be checked for
+      any of the N URLs…")` and the sidebar shows red, not green.
+      **Made visible everywhere the old bug was invisible:** the Fix Plan and
+      Indexing tabs gained the "Couldn't check" bucket (its own colour, count,
+      and one-line explanation) via `BUCKET_ORDER`; the Performance tab shows
+      an explicit "🩺 No coverage data loaded" notice when `coverage_df` is
+      empty, so a page of "Couldn't check yet" verdicts is explained instead
+      of looking like a wall of question marks; Overview's indexing-health
+      section surfaces a warning naming how many pages couldn't be checked;
+      and `VERDICT_LEGEND` explains the new state in plain English (unlike
+      `V_NO_DATA`, which stays deliberately out of the legend, `V_UNCHECKED`
+      is included — it usually means something needs re-checking).
+      *Note:* `tests/test_phase11fix_indexing_verdict.py` (13 new tests):
+      `page_verdict(indexed=None, …)` returns `V_UNCHECKED` not
+      `V_NOT_INDEXED`, and a real `indexed=False` still returns
+      `V_NOT_INDEXED` (the fix doesn't swallow genuine negatives);
+      `classifier.recommend()` buckets an inspection-failure coverage string
+      as `UNKNOWN`, and an error message containing "404" still buckets as
+      `UNKNOWN` rather than `PLUMBING`; a stubbed `gsc._service()` proves
+      `inspect_urls()` now carries the real exception text through instead of
+      dropping it; `refresh_live()` against a 100%-failure stub returns
+      `(0, …)` with the real error quoted, and a partial-failure stub keeps
+      the good rows while bucketing the bad one as `UNKNOWN`; and the
+      sharpest one — `_with_verdicts()` fed an **empty** `coverage_df` (the
+      exact ToolsHall/no-seed/no-refresh shape) alongside a live performance
+      row with real clicks/impressions renders **"🩺 Couldn't check yet"**,
+      not "🔴 Not indexed" — plus the two guardrail tests that a page
+      *confirmed* Healthy still renders correctly and a page *confirmed*
+      broken still says Not indexed, so the fix narrows the bug without
+      widening into a new one. `pytest -q` — 43/43 (the existing 30 plus
+      these 13), including the `test_phase8_ux.py` `connected` fixture's
+      `gsc.inspect_urls` stub, updated to the new 3-tuple contract.
+      **Not verified against toolshall.com's real, live Search Console data**
+      — this sandbox has no Google service-account key (same limitation
+      every phase before this one has noted), so "the exact failure mode
+      that hit toolshall.com" (an inspection auth/quota error vs. simply
+      never having pressed Refresh for a no-seed site) couldn't be
+      distinguished from here. Both are now handled identically and
+      correctly either way, and the reproduction test above forces the
+      precise shape (empty coverage + real live performance) the bug report
+      described. **First real run for this fix:** open Analysis >
+      Performance for toolshall.com, press **Refresh live data** in the
+      sidebar first, and confirm indexed pages now show a real verdict
+      (Backlink candidate / Improve the page / Winning / Fix the
+      title-description) instead of "Not indexed" — and if any page still
+      shows 🩺 "Couldn't check yet" after a refresh, that page's own error is
+      now visible on the Fix Plan's "Couldn't check" section rather than
+      hidden.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its

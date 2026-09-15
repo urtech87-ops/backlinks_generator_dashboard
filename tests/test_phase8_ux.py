@@ -71,7 +71,8 @@ def connected(monkeypatch):
     monkeypatch.setattr(gsc, "discover_urls",
                         lambda sitemap, limit=500: [u for u, _ in LIVE_COVERAGE])
     monkeypatch.setattr(gsc, "inspect_urls",
-                        lambda prop, urls, progress=None: LIVE_COVERAGE)
+                        lambda prop, urls, progress=None:
+                        [(u, cov, "") for u, cov in LIVE_COVERAGE])
     monkeypatch.setattr(gsc, "search_analytics", _search_analytics)
     return _run
 

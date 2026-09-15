@@ -17,6 +17,10 @@ Bucket logic follows the strategist reading of your Search Console data:
                   link-building does anything.
   HEALTHY    -> Indexed. Eligible for the backlink / outreach stage.
   OTHER      -> Intentional or informational (noindex, robots, unknown).
+  UNKNOWN    -> Search Console COULDN'T be checked (an API error, quota, or it
+                simply hasn't been checked yet). This is NOT "not indexed" —
+                it's "we don't know", and it must never be silently read as a
+                real verdict. See ui/data.py::refresh_live().
 """
 
 from dataclasses import dataclass
@@ -27,11 +31,14 @@ CONTENT = "Content"
 CRAWL_BUDGET = "Crawl budget"
 HEALTHY = "Healthy"
 OTHER = "Other"
+UNKNOWN = "Couldn't check"
 
-BUCKET_ORDER = [PLUMBING, CONTENT, CRAWL_BUDGET, OTHER, HEALTHY]
+BUCKET_ORDER = [UNKNOWN, PLUMBING, CONTENT, CRAWL_BUDGET, OTHER, HEALTHY]
 
-# Priority: lower number = deal with it sooner.
+# Priority: lower number = deal with it sooner. UNKNOWN sits with PLUMBING:
+# until it's resolved you don't actually know what this page needs.
 BUCKET_PRIORITY = {
+    UNKNOWN: 1,
     PLUMBING: 1,
     CONTENT: 2,
     CRAWL_BUDGET: 3,
@@ -45,6 +52,11 @@ BUCKET_PRIORITY = {
 # indexed". The bare "indexed -> HEALTHY" case is handled in the fallback below,
 # guarded so it can never fire when "not indexed" is present.
 _COVERAGE_MAP = [
+    # Couldn't check (an inspection error, marked by ui/data.py::refresh_live()
+    # as "Couldn't check: <error>"). MUST be matched first: an API error message
+    # can legitimately contain words like "not found" or "404" describing the
+    # HTTP failure itself, which must never be mistaken for a real coverage verdict.
+    ("couldn't check", UNKNOWN),
     # Plumbing (broken URLs)
     ("redirect error", PLUMBING),
     ("page with redirect", PLUMBING),
@@ -151,6 +163,12 @@ def recommend(url: str, coverage_state: str) -> PageVerdict:
     # Build a concrete action string per bucket, sharpened by the flags.
     if "wp-junk" in flags and bucket in (PLUMBING, OTHER):
         action = "WordPress default / archive page — delete it or set noindex; drop from sitemap. Not worth fixing."
+    elif bucket == UNKNOWN:
+        action = ("Search Console couldn't be checked for this URL last refresh — an API "
+                  "error (auth, quota, or a property/URL mismatch), not a real verdict from "
+                  "Google. This page's actual indexing status is still unknown. Press "
+                  "Refresh live data again; if it keeps failing, run Settings → Test "
+                  "connections to see exactly which step is failing.")
     elif bucket == PLUMBING:
         if "relative-link-bug" in flags:
             action = ("Malformed nested URL. Root cause is almost certainly relative links "

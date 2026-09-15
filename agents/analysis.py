@@ -25,7 +25,7 @@ import datetime as dt
 from agents import backlink as bl
 from agents.opportunity import topic_from_url
 from core import config, gsc, keywords as kw, openrouter
-from core.classifier import PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY
+from core.classifier import PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, UNKNOWN
 
 # ── The five things a page can need ────────────────────────────────────────
 FIX = "Fix the URL"
@@ -109,16 +109,17 @@ V_BACKLINK = "Backlink candidate"
 V_FIX_TITLE = "Fix the title/description"
 V_WINNING = "Winning"
 V_NO_DATA = "Not enough data yet"        # honest fallback — never a guess
+V_UNCHECKED = "Couldn't check yet"       # honest fallback — an unknown, not a "no"
 
 VERDICT_ICON = {
     V_NOT_INDEXED: "🔴", V_IMPROVE: "🟠", V_BACKLINK: "🟢",
-    V_FIX_TITLE: "🟡", V_WINNING: "🏆", V_NO_DATA: "⚪",
+    V_FIX_TITLE: "🟡", V_WINNING: "🏆", V_NO_DATA: "⚪", V_UNCHECKED: "🩺",
 }
 
 # Badge colour state, the same "ok/warn/bad/idle" vocabulary ui.components uses.
 VERDICT_STATE = {
     V_NOT_INDEXED: "bad", V_IMPROVE: "warn", V_BACKLINK: "ok",
-    V_FIX_TITLE: "warn", V_WINNING: "ok", V_NO_DATA: "idle",
+    V_FIX_TITLE: "warn", V_WINNING: "ok", V_NO_DATA: "idle", V_UNCHECKED: "idle",
 }
 
 VERDICT_REASON = {
@@ -130,12 +131,23 @@ VERDICT_REASON = {
     V_WINNING: "Winning — leave it, monitor.",
     V_NO_DATA: "No Search Console figures for this page in this date range, so "
                "there's nothing to judge it on yet.",
+    V_UNCHECKED: "Search Console couldn't be checked for this page — an API error on the "
+                 "last refresh, or it simply hasn't been refreshed yet. This is NOT a "
+                 "confirmed \"not indexed\": it's an unknown. Press Refresh live data in "
+                 "the sidebar; if it keeps failing, run Settings → Test connections.",
 }
 
-# The five real verdicts, worst problem first — what the legend on screen
-# explains. V_NO_DATA isn't one of the five: it's the honest state for a page
-# with nothing measured yet, so it's left out on purpose.
+# The real verdicts, worst problem first — what the legend on screen explains.
+# V_NO_DATA is left out on purpose: it's the ordinary state for an indexed page
+# with nothing measured yet, not something to act on. V_UNCHECKED IS included,
+# because unlike V_NO_DATA it usually means something needs re-checking, and a
+# user seeing it for the first time needs to know it is not a real "no".
 VERDICT_LEGEND = [
+    (VERDICT_ICON[V_UNCHECKED], V_UNCHECKED,
+     "Search Console couldn't be checked for this page — an API error, or it "
+     "hasn't been refreshed yet. This is NOT the same as \"not indexed\": it's "
+     "an unknown, and the fix is to refresh (or check the connection), not to "
+     "assume the worst."),
     (VERDICT_ICON[V_NOT_INDEXED], V_NOT_INDEXED,
      "Google hasn't accepted the page yet, so no amount of content or links "
      "can help it until that's fixed."),
@@ -153,17 +165,26 @@ VERDICT_LEGEND = [
 ]
 
 
-def page_verdict(indexed: bool, position: float, impressions: int, ctr: float,
+def page_verdict(indexed, position: float, impressions: int, ctr: float,
                  has_metrics: bool, thresholds: dict = None) -> dict:
     """
     The one thing a page needs next, decided only from measured numbers —
     never guessed. `indexed` comes from the coverage classifier; `position` /
     `impressions` / `ctr` come straight from a Search Console row for this
     page. Returns {"label", "icon", "reason"}.
+
+    `indexed` is a tri-state, on purpose: `True` (confirmed indexed), `False`
+    (confirmed NOT indexed — Google actually said so), or `None` — Search
+    Console was never checked for this page, or the check failed. `None` must
+    NEVER be treated as `False`: a failed/missing check is an unknown, not a
+    real "no", and collapsing the two is exactly the bug that made every page
+    read "Not indexed" when the true cause was an unrefreshed or errored check.
     """
     t = thresholds or VERDICT_THRESHOLDS
 
-    if not indexed:
+    if indexed is None:
+        label = V_UNCHECKED
+    elif not indexed:
         label = V_NOT_INDEXED
     elif not has_metrics or not impressions or not position:
         label = V_NO_DATA
@@ -205,7 +226,16 @@ class PageStat:
     keyword_impressions: int = 0
 
     @property
-    def indexed(self) -> bool:
+    def indexed(self):
+        """
+        Tri-state on purpose: True (confirmed indexed), False (confirmed NOT
+        indexed), or None when the bucket is UNKNOWN — Search Console
+        couldn't be checked for this page. None must reach page_verdict() as
+        None, never as False, or a failed check silently reads as a real
+        "not indexed".
+        """
+        if self.bucket == UNKNOWN:
+            return None
         return self.bucket == HEALTHY
 
     @property
@@ -223,6 +253,10 @@ class PageStat:
     def link_note(self) -> str:
         if self.bucket == HEALTHY:
             return "Indexed, so links to this page compound."
+        if self.bucket == UNKNOWN:
+            return ("Search Console couldn't be checked for this page — an unknown, not a "
+                    "confirmed 'not indexed'. Refresh live data before deciding whether to "
+                    "link to it.")
         if self.bucket == CRAWL_BUDGET:
             return ("Discovered but never crawled — the one case where a backlink "
                     "actually changes indexing.")
@@ -240,13 +274,14 @@ class PageStat:
 
     @property
     def status_state(self) -> str:
-        return {HEALTHY: "ok", CRAWL_BUDGET: "warn",
-                PLUMBING: "bad", CONTENT: "bad"}.get(self.bucket, "idle")
+        return {HEALTHY: "ok", CRAWL_BUDGET: "warn", PLUMBING: "bad",
+                CONTENT: "bad", UNKNOWN: "idle"}.get(self.bucket, "idle")
 
     @property
     def status_label(self) -> str:
         return {HEALTHY: "indexed", CRAWL_BUDGET: "not crawled yet",
-                PLUMBING: "broken URL", CONTENT: "refused on quality"}.get(
+                PLUMBING: "broken URL", CONTENT: "refused on quality",
+                UNKNOWN: "couldn't check"}.get(
                     self.bucket, self.bucket.lower() or "unknown")
 
     @property
