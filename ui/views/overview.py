@@ -47,6 +47,8 @@ def render(ctx) -> None:
     )
 
     coverage_df, coverage_source = d.coverage_frame(site)
+    c.autoload_notice(d.autoload_result(site))
+    c.stale_coverage_banner(coverage_source, ctx.creds)
     # The run happens before anything is drawn, so a fresh report is what the
     # sections below show — not the previous one with a rerun's delay.
     report = _report(ctx, coverage_df, coverage_source)
@@ -346,6 +348,18 @@ def _winners(ctx, report, coverage_source: str) -> None:
     if report.source == "live":
         st.caption(f"Ranked on real Search Console impressions for {report.range}. "
                    "The top of this list is where a link or a rewrite pays back fastest.")
+        if coverage_source == "seed":
+            # Performance figures came back live, but the indexing status behind
+            # each verdict below is still the sample snapshot — the exact
+            # mismatch that let an indexed page's row read "Not indexed". Say
+            # so here, next to the ranking it would otherwise look to confirm.
+            st.warning(
+                "⚠️ Performance is live, but indexing status for these pages is "
+                "still the **sample snapshot** — the verdict badge on each row "
+                "below may not match what Google says today. Press **Refresh "
+                "live data** in the sidebar before acting on any verdict here.",
+                icon="⚠️",
+            )
     else:
         st.caption("⚠️ No Search Console performance figures for this range, so these are "
                    "your link-eligible pages in coverage order — **not** a performance "
@@ -355,11 +369,12 @@ def _winners(ctx, report, coverage_source: str) -> None:
                       if coverage_source == "seed" else ""))
 
     for i, stat in enumerate(report.pages):
-        _page_row(stat, i)
+        _page_row(stat, i, coverage_source)
 
 
-def _page_row(stat, index: int) -> None:
+def _page_row(stat, index: int, coverage_source: str = "live") -> None:
     """One page: what it is, what it earns, and the three buttons."""
+    sample = coverage_source == "seed"
     with st.container(border=True):
         info, badge = st.columns([6, 2])
         with info:
@@ -371,9 +386,14 @@ def _page_row(stat, index: int) -> None:
                            f"{stat.keyword_position} on "
                            f"{stat.keyword_impressions:,} impressions.")
             v = stat.verdict
-            c.show_badge(analysis.VERDICT_STATE.get(v["label"], "idle"),
-                         f'{v["icon"]} {v["label"]}')
-            st.caption(v["reason"])
+            # A verdict computed from the sample snapshot must never look
+            # exactly like one computed from live coverage — same bug this
+            # phase closes, said again at the one place a user actually acts.
+            label = f'{v["icon"]} {v["label"]}' + (" (sample)" if sample else "")
+            c.show_badge("warn" if sample else analysis.VERDICT_STATE.get(v["label"], "idle"),
+                         label)
+            st.caption(v["reason"] + (" — from the sample snapshot, not live data."
+                                      if sample else ""))
         with badge:
             c.show_badge(stat.status_state, stat.status_label)
             st.caption(stat.coverage)

@@ -101,6 +101,7 @@ def _text(at: AppTest) -> str:
     parts += [el.value for el in at.info]
     parts += [el.value for el in at.warning]
     parts += [el.value for el in at.success]
+    parts += [el.value for el in at.error]
     return " ".join(str(p) for p in parts)
 
 
@@ -162,20 +163,50 @@ def test_onboarding_strip_is_present_and_tracks_state(disconnected):
 
 
 # ── Connecting replaces the sample with live data ──────────────────────────
-def test_refresh_replaces_sample_coverage_with_live(connected):
+def test_connecting_auto_loads_live_coverage(connected):
+    """
+    The stale-data bug this guards against: a Google key file being present
+    used to mean nothing changed on screen until a human remembered to press
+    Refresh live data — so a connected session could keep showing the old
+    sample snapshot, with nothing saying so, and an indexed page could read
+    "Not indexed" simply because nobody had refreshed yet. The first data
+    screen opened in a session now loads live coverage automatically instead.
+    """
     at = connected()
-    assert "SAMPLE data" in _text(at)
-
-    _refresh(at)
 
     rows = at.session_state["coverage_toolsvenue"]
     assert rows == LIVE_COVERAGE
     text = _text(at)
     assert "Live data from Search Console" in text
     assert "SAMPLE data" not in text
+    assert "Loaded live coverage for 4 URLs" in text   # the auto-load notice
 
     tracked = next(m for m in at.metric if m.label == "Pages tracked")
     assert tracked.value == str(len(LIVE_COVERAGE))
+
+
+def test_refresh_button_still_works_after_the_auto_load(connected):
+    """The manual button is still there and still works, on top of the auto-load."""
+    at = _refresh(connected())
+    rows = at.session_state["coverage_toolsvenue"]
+    assert rows == LIVE_COVERAGE
+    assert "Live data from Search Console" in _text(at)
+
+
+def test_stale_sample_never_shown_when_connected_but_refresh_fails(monkeypatch):
+    """
+    Credentials present, but Search Console can't actually be reached (auth,
+    quota, whatever) — the auto-load fails, and the page must say so loudly
+    rather than quietly falling back to the sample snapshot looking no
+    different than usual.
+    """
+    monkeypatch.setattr(config, "credentials_available", lambda: True)
+    monkeypatch.setattr(gsc, "discover_urls", lambda sitemap, limit=500: [])
+    monkeypatch.setattr(gsc, "search_analytics", _search_analytics)
+    at = _run()
+    text = _text(at)
+    assert "Tried to load live coverage automatically" in text
+    assert "Showing sample data" in text
 
 
 def test_live_performance_shows_without_pressing_run(connected):

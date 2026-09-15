@@ -47,6 +47,8 @@ def render(ctx) -> None:
     )
 
     df, source = d.coverage_frame(site)
+    c.autoload_notice(d.autoload_result(site))
+    c.stale_coverage_banner(source, ctx.creds)
     c.data_source_note(source)
     st.caption("**Fix Plan** = what's broken and how to mend it · **Indexing** = how much "
                "of the site Google has accepted · **Performance** = what you earn in "
@@ -62,7 +64,7 @@ def render(ctx) -> None:
     with tab_index:
         _indexing(df, source)
     with tab_perf:
-        _performance(ctx, df)
+        _performance(ctx, df, source)
     with tab_aud:
         _audience(ctx)
 
@@ -229,7 +231,7 @@ def _indexing(df: pd.DataFrame, source: str) -> None:
 
 
 # ── Performance (GSC Search Analytics) ─────────────────────────────────────
-def _performance(ctx, coverage_df: pd.DataFrame) -> None:
+def _performance(ctx, coverage_df: pd.DataFrame, coverage_source: str = "live") -> None:
     if not ctx.creds:
         c.empty_state(
             "Performance needs the live Search Console API",
@@ -270,13 +272,20 @@ def _performance(ctx, coverage_df: pd.DataFrame) -> None:
                     "below can't tell indexed pages from unindexed ones — every row reads "
                     "**Couldn't check yet**, which is honest but not useful. Press "
                     "**Refresh live data** in the sidebar to fill it in.", icon="🩺")
+        elif coverage_source == "seed":
+            st.warning(
+                "⚠️ These performance figures are live, but the indexing status behind "
+                "the Verdict column is still the **sample snapshot** — press **Refresh "
+                "live data** in the sidebar before trusting any verdict below.",
+                icon="⚠️")
         c.section("Which pages earn the most",
                   "Sorted by impressions. Lots of impressions at a weak average position "
                   "is the best-value row on this table — the demand is already there, "
                   "the page just isn't high enough yet. Every row also gets a verdict: "
                   "the one thing that page needs next.")
         st.dataframe(
-            _perf_frame(_with_verdicts(coverage_df, pdf)), width="stretch", hide_index=True,
+            _perf_frame(_with_verdicts(coverage_df, pdf, coverage_source)),
+            width="stretch", hide_index=True,
             column_config={
                 "Verdict": st.column_config.TextColumn(
                     "Verdict", help="What this page needs next — see the legend below."),
@@ -308,7 +317,8 @@ def _performance(ctx, coverage_df: pd.DataFrame) -> None:
                         "cheapest traffic you own.")
 
 
-def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame:
+def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame,
+                   coverage_source: str = "live") -> pd.DataFrame:
     """
     Attach "what this page needs next" to each performance row, using the
     same page_verdict() the Overview's winners list uses — one place decides,
@@ -323,6 +333,13 @@ def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame
     never a silent "Not indexed". This is the fix for the bug where a page
     Search Console confirms is indexed could still show "Not indexed" here
     simply because the coverage snapshot behind this tab was empty or stale.
+
+    `coverage_source` is a second, separate honesty check: even a page that
+    IS confidently classified (Healthy / Plumbing / …) was classified from
+    whatever `coverage_df` holds, and when that's the sample snapshot rather
+    than this session's live sweep, the verdict is only ever as fresh as that
+    snapshot — so it's marked "(sample)" rather than shown exactly like a
+    verdict backed by live coverage.
     """
     known_urls, indexed_urls, unchecked_urls = set(), set(), set()
     if coverage_df is not None and not coverage_df.empty:
@@ -339,6 +356,8 @@ def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame
             return None          # never checked (this run) — not a confirmed "no"
         return False              # actually checked and confirmed not indexed
 
+    sample = coverage_source == "seed" and not (coverage_df is None or coverage_df.empty)
+
     def _row_verdict(row):
         v = ag.page_verdict(
             indexed=_indexed_state(str(row["page"])),
@@ -347,7 +366,10 @@ def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame
             ctr=float(row.get("ctr", 0) or 0),
             has_metrics=True,   # this row exists because GSC measured it
         )
-        return pd.Series({"Verdict": f'{v["icon"]} {v["label"]}', "Why": v["reason"]})
+        label = f'{v["icon"]} {v["label"]}' + (" (sample)" if sample else "")
+        why = v["reason"] + (" — the coverage behind this is the sample snapshot, "
+                             "not live data." if sample else "")
+        return pd.Series({"Verdict": label, "Why": why})
 
     out = pdf.copy()
     out[["Verdict", "Why"]] = out.apply(_row_verdict, axis=1)

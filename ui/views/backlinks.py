@@ -46,6 +46,8 @@ def render(ctx) -> None:
     )
 
     df, source = d.coverage_frame(site)
+    c.autoload_notice(d.autoload_result(site))
+    c.stale_coverage_banner(source, ctx.creds)
     summary = d.health_summary(df)
     counts = summary["counts"]
     linkable = counts.get(HEALTHY, 0)
