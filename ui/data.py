@@ -27,6 +27,13 @@ def refresh_live(site: config.Site) -> tuple[int, str]:
     """
     Pull live coverage for a site. Returns (row_count, message). Never raises —
     on failure it returns 0 and an explanation, and the seed stays in place.
+
+    `row_count` is the number of URLs Search Console actually gave a real
+    verdict for. A URL Inspection call that errors (auth, quota, a
+    property/URL mismatch) is stored too — as a "Couldn't check" row, never
+    silently folded into "not indexed" — but it does NOT count toward
+    `row_count`, so a refresh where every single call failed correctly reports
+    as a failure (0, an error message) rather than a false success.
     """
     if not config.credentials_available():
         return 0, ("No Google service-account file found. Add it on the Settings page, "
@@ -38,19 +45,38 @@ def refresh_live(site: config.Site) -> tuple[int, str]:
                    "URL on the Settings page.")
 
     bar = st.progress(0.0, text=f"Inspecting {len(urls)} URLs via Search Console…")
-    rows = gsc.inspect_urls(
+    results = gsc.inspect_urls(
         site.gsc_property, urls,
         progress=lambda done, total: bar.progress(
             done / total, text=f"Inspecting URLs… {done}/{total}"),
     )
     bar.empty()
 
-    if not rows:
+    if not results:
         return 0, ("Search Console returned nothing. Run the connection test on the "
                    "Settings page to see which step is failing.")
 
-    st.session_state[_state_key(site)] = rows
-    return len(rows), f"Loaded live coverage for {len(rows)} URLs."
+    ok = [(url, coverage) for url, coverage, error in results if not error]
+    failed = [(url, error) for url, coverage, error in results if error]
+
+    # Every row is kept — including failed ones, marked so the classifier puts
+    # them in the honest "Couldn't check" bucket instead of "not indexed".
+    st.session_state[_state_key(site)] = ok + [
+        (url, f"Couldn't check: {error}") for url, error in failed
+    ]
+
+    if failed and not ok:
+        sample = f' (e.g. "{failed[0][1]}")' if failed[0][1] else ""
+        return 0, (f"Search Console couldn't be checked for any of the {len(results)} URLs"
+                   f"{sample} — that's an API failure, not a real answer from Google. "
+                   "None of these pages should be read as 'not indexed'. Run Settings → "
+                   "Test connections to see exactly which step is failing.")
+    if failed:
+        sample = f' (e.g. "{failed[0][1]}")' if failed[0][1] else ""
+        return len(ok), (f"Loaded live coverage for {len(ok)} URLs — {len(failed)} couldn't "
+                         f"be checked{sample} and are marked \"Couldn't check\" on the Fix "
+                         "Plan rather than counted as not indexed.")
+    return len(ok), f"Loaded live coverage for {len(ok)} URLs."
 
 
 def coverage_rows(site: config.Site) -> tuple[list, str]:

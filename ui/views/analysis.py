@@ -13,12 +13,13 @@ import streamlit as st
 from agents import analysis as ag
 from core import config, ga4, gsc, seed
 from core.classifier import (
-    BUCKET_ORDER, PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, OTHER,
+    BUCKET_ORDER, PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, OTHER, UNKNOWN,
 )
 from ui import components as c
 from ui import data as d
 
 BUCKET_COLOR = {
+    UNKNOWN: "#5b5bd6",        # indigo — an unknown, not a verdict
     PLUMBING: "#e5484d",       # red — broken, fix first
     CONTENT: "#f76b15",        # orange — rewrite
     CRAWL_BUDGET: "#f5d90a",   # yellow — links/internal
@@ -28,6 +29,8 @@ BUCKET_COLOR = {
 EVERYTHING = "Everything that needs doing"
 
 BUCKET_ONELINER = {
+    UNKNOWN: "Search Console couldn't be checked for these — an API error on the last "
+             "refresh, not a real verdict. NOT the same as 'not indexed'.",
     PLUMBING: "Broken URL — Google can't index it. Fix the redirect/404. No backlink helps.",
     CONTENT: "Crawled and rejected on quality. Rewrite required.",
     CRAWL_BUDGET: "Not crawled yet. Internal links + sitemap. The only place backlinks help.",
@@ -262,6 +265,11 @@ def _performance(ctx, coverage_df: pd.DataFrame) -> None:
             ("Pages earning impressions", len(pdf),
              "How many of your pages Google showed to anyone at all."),
         ])
+        if coverage_df is None or coverage_df.empty:
+            st.info("🩺 No coverage data loaded for this site yet, so the Verdict column "
+                    "below can't tell indexed pages from unindexed ones — every row reads "
+                    "**Couldn't check yet**, which is honest but not useful. Press "
+                    "**Refresh live data** in the sidebar to fill it in.", icon="🩺")
         c.section("Which pages earn the most",
                   "Sorted by impressions. Lots of impressions at a weak average position "
                   "is the best-value row on this table — the demand is already there, "
@@ -305,15 +313,35 @@ def _with_verdicts(coverage_df: pd.DataFrame, pdf: pd.DataFrame) -> pd.DataFrame
     Attach "what this page needs next" to each performance row, using the
     same page_verdict() the Overview's winners list uses — one place decides,
     two screens display it.
+
+    `indexed` is looked up as a tri-state, not a plain True/False. A page only
+    reads as confirmed NOT indexed when this run's coverage data actually says
+    so (PLUMBING / CONTENT / CRAWL_BUDGET / OTHER). Any page missing from that
+    coverage data entirely — never refreshed this session, not in the sitemap
+    sweep, or this site has no seed to fall back on — or marked UNKNOWN
+    (Search Console errored while checking it) gets `None`: an honest unknown,
+    never a silent "Not indexed". This is the fix for the bug where a page
+    Search Console confirms is indexed could still show "Not indexed" here
+    simply because the coverage snapshot behind this tab was empty or stale.
     """
-    indexed_urls = set()
+    known_urls, indexed_urls, unchecked_urls = set(), set(), set()
     if coverage_df is not None and not coverage_df.empty:
-        indexed_urls = set(coverage_df.loc[coverage_df["Bucket"] == HEALTHY, "URL"]
-                           .str.rstrip("/"))
+        urls = coverage_df["URL"].str.rstrip("/")
+        known_urls = set(urls)
+        indexed_urls = set(urls[coverage_df["Bucket"] == HEALTHY])
+        unchecked_urls = set(urls[coverage_df["Bucket"] == UNKNOWN])
+
+    def _indexed_state(url: str):
+        url = url.rstrip("/")
+        if url in indexed_urls:
+            return True
+        if url not in known_urls or url in unchecked_urls:
+            return None          # never checked (this run) — not a confirmed "no"
+        return False              # actually checked and confirmed not indexed
 
     def _row_verdict(row):
         v = ag.page_verdict(
-            indexed=str(row["page"]).rstrip("/") in indexed_urls,
+            indexed=_indexed_state(str(row["page"])),
             position=float(row.get("position", 0) or 0),
             impressions=int(row.get("impressions", 0) or 0),
             ctr=float(row.get("ctr", 0) or 0),

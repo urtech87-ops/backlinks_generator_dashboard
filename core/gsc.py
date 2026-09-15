@@ -92,7 +92,12 @@ def inspect_urls(site_property: str, urls: list[str], progress=None):
     """
     Inspect a batch of URLs. `progress` is an optional callback(done, total)
     so the UI can show a progress bar. Rate limit is 2000/day, 600/min — fine
-    for ~100 pages. Returns [(url, coverage_state), ...].
+    for ~100 pages. Returns [(url, coverage_state, error), ...] — `error` is
+    "" on success and the exception message on failure. Callers MUST check
+    `error` rather than treating a blank `coverage_state` as "not indexed":
+    a failed call (auth, quota, a property/URL mismatch) also leaves
+    `coverage_state` blank, and collapsing the two would silently turn "we
+    couldn't check" into a false "Google says no".
     """
     service = _service()
     if service is None:
@@ -101,7 +106,7 @@ def inspect_urls(site_property: str, urls: list[str], progress=None):
     total = len(urls)
     for i, url in enumerate(urls, 1):
         info = inspect_url(service, site_property, url)
-        out.append((url, info.get("coverage", "")))
+        out.append((url, info.get("coverage", ""), info.get("error", "")))
         if progress:
             progress(i, total)
     return out

@@ -280,6 +280,13 @@ def _health(report, coverage_source: str) -> None:
     ])
     st.progress(h["healthy"] / h["total"])
     c.data_source_note(coverage_source)
+    unchecked = (h.get("counts") or {}).get(analysis.UNKNOWN, 0)
+    if unchecked:
+        st.warning(
+            f"🩺 Search Console couldn't be checked for {unchecked} page(s) on the last "
+            "refresh — an API error, not a real answer from Google. They're **not** "
+            "counted as confirmed 'not indexed'. See the Fix Plan's \"Couldn't check\" "
+            "section, or press Refresh live data again.", icon="🩺")
     c.jargon_note("Indexed", "Crawl budget", "Backlink")
 
 
