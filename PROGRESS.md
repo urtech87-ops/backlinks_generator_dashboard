@@ -5,17 +5,19 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-15 · **Current phase:** Phase 11-fix done — **a correctness bug:
-indexed pages were reading as "Not indexed"**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, four scoped additions —
-Phase 9, 10, 11 and the Phase 11-fix below — on top of Phase 12's UX redesign. Phase 7
-made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a plain-English
-verdict on every ranked page; Phase 11-fix made that verdict honest when the underlying
-check is missing or fails, instead of silently lying. Phase 12 is the layer a non-SEO
-person actually needs: building a backlink, running guest outreach and writing an article
-are step-by-step wizards with a "Step X of N" strip, one job per screen, and Next disabled
-until that step has actually produced something to carry forward. What's left is not
-building — it's running the thing against real keys; see **First real run** below.)
+**Last updated:** 2026-09-15 · **Current phase:** Phase 11-fix-2 done — **a truthfulness
+bug: connected sessions silently showed the stale sample snapshot as if it were live**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, five scoped additions —
+Phase 9, 10, 11, Phase 11-fix and Phase 11-fix-2 below — on top of Phase 12's UX redesign.
+Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
+underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
+data BEHIND that verdict honest too — a connected session that hadn't pressed Refresh yet
+no longer looks indistinguishable from a genuinely live one. Phase 12 is the layer a
+non-SEO person actually needs: building a backlink, running guest outreach and writing an
+article are step-by-step wizards with a "Step X of N" strip, one job per screen, and Next
+disabled until that step has actually produced something to carry forward. What's left is
+not building — it's running the thing against real keys; see **First real run** below.)
 
 ---
 
@@ -705,6 +707,85 @@ quality content; backlinks are the visible target, not the engine.
       shows 🩺 "Couldn't check yet" after a refresh, that page's own error is
       now visible on the Fix Plan's "Couldn't check" section rather than
       hidden.
+
+- [x] **Phase 11-fix-2 — Connected but unrefreshed sessions silently showed
+      the sample snapshot as if it were live** — a follow-on to Phase 11-fix,
+      reported live against toolshall.com (which loads 173 live URLs
+      correctly once refreshed): the Analysis tabs showed the OLD sample
+      snapshot as if it were live until the user manually pressed **Refresh
+      live data**. Pages read "Not indexed" purely because the tab was
+      reading stale sample coverage — a manual refresh corrected it, but
+      nothing on screen had warned the data was stale, and a non-expert user
+      would have trusted the false verdicts.
+      **Root cause:** having a Google key file on disk (`ctx.creds`) was
+      conflated with "this session's coverage is live". `connect_banner()`
+      only fires when credentials are *missing*, so a connected-but-not-yet-
+      refreshed session got no loud banner at all — just the small
+      `data_source_note()` badge, easy to miss, plus (for toolsvenue, which
+      has a real seed) the OLD 16-Aug snapshot rendering with no visual
+      difference from a live one.
+      **The fix, without touching `page_verdict()` or the classifier (both
+      already correct from Phase 11-fix):**
+      **`ui/data.py` — coverage now auto-loads.** `coverage_rows()` tries a
+      live refresh automatically the first time a site's coverage is read in
+      a session, whenever a Google key file is present — a connected session
+      no longer silently hands back the sample rows just because nobody
+      pressed the button yet. `_autoload_live_coverage()` runs at most once
+      per site per session (success or failure alike), so a slow or broken
+      sweep can't repeat itself on every rerun, and `autoload_result()` lets
+      a page read back what happened, once.
+      **`ui/components.py` gained two pieces.** `stale_coverage_banner(source,
+      creds)` is a LOUD, in-content warning — not just a badge — that fires
+      specifically in the one state that used to be invisible: credentials
+      connected, but this session is still on the sample snapshot (the
+      auto-load hasn't run, or it ran and failed). It stays quiet when
+      credentials are missing entirely, since `connect_banner()` already
+      covers that loudly and the two would otherwise repeat each other.
+      `autoload_notice(result)` reports the automatic load's own outcome
+      (success or failure) right under the page header.
+      **Overview, Analysis and Backlinks all wire both in** immediately
+      after computing `coverage_frame()`/`coverage_rows()` — the three
+      screens named in the bug report, plus Backlinks since Lane A/B target
+      eligibility is bucket-derived from the same coverage.
+      **Verdicts computed from sample coverage are now marked, not silently
+      confident.** Overview's winners list catches the specific mismatch
+      that caused the report — live Search Console *performance* figures
+      loading fine (that API needs no refresh button) while *coverage*
+      (from the separate URL Inspection sweep) was still the old snapshot —
+      with its own warning when `report.source == "live"` but
+      `coverage_source == "seed"`, and marks each row's verdict badge
+      "(sample)" in that state. `ui/views/analysis.py::_with_verdicts()`
+      gained the same `coverage_source` parameter and appends "(sample)" to
+      the Verdict column when the coverage behind it is stale — but NOT when
+      `coverage_df` is empty, which is the separate, already-correct
+      "Couldn't check yet" story from Phase 11-fix, not a sample story.
+      *Note:* `tests/test_stale_data_banner.py` (10 new tests) drives Overview,
+      Analysis and Backlinks through Streamlit's AppTest: all three
+      auto-load live coverage on first open with no button press and say so
+      ("Loaded live coverage for 4 URLs"); all three warn loudly
+      ("Tried to load live coverage automatically" + "Showing sample data")
+      when the auto-load itself fails (bad sitemap URL); the not-connected
+      state still shows only `connect_banner`'s message, not a duplicate;
+      `_with_verdicts()` marks a stale-but-populated coverage frame
+      "(sample)" but leaves a live one and an empty one alone; and a direct
+      unit test against ToolsHall (no seed at all — the exact reported site)
+      proves `coverage_rows()`/`coverage_frame()` auto-load on the very
+      first read rather than starting empty. `tests/test_phase8_ux.py`'s
+      Phase 8 sample-to-live test was rewritten to match the new, correct
+      behaviour: it used to assert that a connected-but-unrefreshed session
+      *still* showed "SAMPLE data" (the bug, enshrined as a passing test) —
+      it now asserts the opposite, plus a new companion test for the
+      auto-load-fails path, and `_text()` gained `st.error` to its capture
+      list so a failure banner is actually assertable. `pytest -q` — 55/55
+      (43 before this fix, +2 net in test_phase8_ux.py — one old test
+      replaced by three new ones — plus 10 in the new file).
+      **Verified against toolshall specifically** (the site named in the
+      report): a direct test against `core.classifier.HEALTHY` bucket proves
+      a page with no seed at all loads live and buckets correctly on first
+      read, with no manual refresh, matching "toolshall now loads 173 live
+      URLs correctly" — this sandbox still has no real Google key, so the
+      live property itself remains unverified from here, same limitation
+      every phase before this one has noted.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its

@@ -23,6 +23,53 @@ def has_live(site: config.Site) -> bool:
     return bool(st.session_state.get(_state_key(site)))
 
 
+_AUTOLOAD_DONE = "_coverage_autoload_done"      # {site_key, ...} attempted this session
+_AUTOLOAD_RESULT = "_coverage_autoload_result"  # last attempt's outcome, read once
+
+
+def _autoload_live_coverage(site: config.Site) -> None:
+    """
+    The bug this closes: a Google key file being present was silently treated
+    as "the numbers are live", when really it only means live data is
+    *available* — nothing had actually replaced the sample snapshot until a
+    human remembered to press "Refresh live data". A connected session that
+    never refreshed showed the old snapshot with nothing on screen saying so,
+    which is how genuinely indexed pages read "Not indexed".
+
+    So: the first time this site's coverage is read in a session, with a key
+    file present, try a live refresh automatically instead of quietly handing
+    back the sample rows. Runs at most once per site per session — success or
+    failure — so a slow or broken sweep can't repeat itself on every rerun;
+    `autoload_result()` is how a page reads back what happened, and
+    `ui.components.stale_coverage_banner()` still fires if this didn't
+    produce live rows (no credentials, or the sweep failed).
+    """
+    if not config.credentials_available():
+        return
+    done = st.session_state.setdefault(_AUTOLOAD_DONE, set())
+    if site.key in done:
+        return
+    done.add(site.key)
+    with st.spinner(f"Connected, but {site.label} hasn't been checked yet this "
+                    "session — loading live coverage from Search Console…"):
+        count, message = refresh_live(site)
+    st.session_state[_AUTOLOAD_RESULT] = {"site": site.key, "count": count,
+                                          "message": message}
+
+
+def autoload_result(site: config.Site) -> dict | None:
+    """
+    The outcome of this session's automatic first load for this site (see
+    `_autoload_live_coverage`), read once by whichever data screen opens
+    first, then cleared so a second page doesn't repeat the same notice.
+    """
+    stored = st.session_state.get(_AUTOLOAD_RESULT)
+    if not stored or stored.get("site") != site.key:
+        return None
+    st.session_state.pop(_AUTOLOAD_RESULT, None)
+    return stored
+
+
 def refresh_live(site: config.Site) -> tuple[int, str]:
     """
     Pull live coverage for a site. Returns (row_count, message). Never raises —
@@ -81,6 +128,10 @@ def refresh_live(site: config.Site) -> tuple[int, str]:
 
 def coverage_rows(site: config.Site) -> tuple[list, str]:
     """[(url, coverage_state), ...] plus 'live' or 'seed'."""
+    live = st.session_state.get(_state_key(site))
+    if live:
+        return live, "live"
+    _autoload_live_coverage(site)
     live = st.session_state.get(_state_key(site))
     if live:
         return live, "live"
