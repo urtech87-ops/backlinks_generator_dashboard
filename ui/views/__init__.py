@@ -21,7 +21,7 @@ class Ctx:
 
 
 from . import (overview, analysis, opportunities, content, backlinks,  # noqa: E402
-               settings)
+               saved_impact, settings)
 
 # Sidebar order mirrors the system tree: data → decide → do → configure.
 PAGES = {
@@ -35,6 +35,8 @@ PAGES = {
                 "Research and write articles into WordPress drafts"),
     "Backlinks": ("🔗", backlinks.render,
                   "Auto-publish to owned platforms, plus guest outreach"),
+    "Saved & Impact": ("💾", saved_impact.render,
+                       "Everything you've saved, and before/after on pages you've worked on"),
     "Settings": ("⚙️", settings.render,
                  "Sites, models, API keys and connection tests"),
 }
