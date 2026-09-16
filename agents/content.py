@@ -103,18 +103,55 @@ def _domain(url: str) -> str:
     return re.sub(r"^www\.", "", re.sub(r"https?://([^/]+).*", r"\1", url or "").lower())
 
 
-def internal_link_options(coverage_df, site, limit: int = 30) -> list:
+_STOPWORDS = {
+    "the", "a", "an", "of", "to", "in", "on", "for", "and", "or", "how", "do",
+    "does", "is", "are", "what", "your", "you", "with", "without", "best",
+    "free", "vs", "using", "use", "can", "will", "not", "from", "this", "that",
+}
+
+
+def _topic_words(*texts: str) -> set:
+    words = re.findall(r"[a-z0-9]+", " ".join(t or "" for t in texts).lower())
+    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
+
+
+def _slug_words(url: str) -> set:
+    """The words in a URL's path, the same shape a topic's keywords are in."""
+    path = re.sub(r"^https?://[^/]+", "", url or "")
+    return _topic_words(path.replace("-", " ").replace("_", " ").replace("/", " "))
+
+
+def internal_link_options(coverage_df, site, topic: str = "", keyword: str = "",
+                          limit: int = 30) -> list:
     """
     Real pages on the user's own site an article may link to, taken from the
-    shared coverage frame. Only indexed (Healthy) pages are offered: linking a
-    new article to a page Google has rejected spreads the problem rather than
-    fixing it, and the Fix Plan is where those belong.
+    live sitemap cross-checked against live indexing (`coverage_df`, built from
+    `config.Site.sitemap_url` + Search Console's URL Inspection). Only indexed
+    (Healthy) pages are offered: linking a new article to a page Google has
+    rejected spreads the problem rather than fixing it, and the Fix Plan is
+    where those belong.
+
+    When a topic/keyword is given, candidates are ranked by RELEVANCE —
+    keyword overlap between the topic and the page's own URL/slug — so the
+    handful actually offered to the writer (and pre-ticked in the UI) are the
+    ones a reader would plausibly click from this article, not just the first
+    N healthy pages in sitemap order.
     """
     if coverage_df is None or getattr(coverage_df, "empty", True):
         return []
     healthy = coverage_df[coverage_df["Bucket"] == HEALTHY]
-    return [{"url": row["URL"], "page": row["Page"]}
-            for _, row in healthy.head(limit).iterrows()]
+    options = [{"url": row["URL"], "page": row["Page"]}
+              for _, row in healthy.iterrows()]
+
+    target = _topic_words(topic, keyword)
+    if target:
+        for o in options:
+            o["score"] = len(target & _slug_words(o["url"]))
+        options.sort(key=lambda o: (-o["score"], o["page"]))
+    else:
+        for o in options:
+            o["score"] = 0
+    return options[:limit]
 
 
 # ── 1. Research ────────────────────────────────────────────────────────────
@@ -200,20 +237,24 @@ def _sources_block(res: Research) -> str:
 
 
 def _internal_block(site, links: list, brand: dict) -> str:
-    if not links:
-        return (f"The article is for {site.label} ({site.homepage}). No internal link "
-                f"targets were supplied, so link only to {site.homepage} once, naturally, "
-                "and leave `internal_links` otherwise empty. Do not invent URLs on this "
-                "domain — a link to a page that does not exist is a 404.")
-    described = "\n".join(f"- {l['url']}  ({l.get('page', '')})" for l in links[:20])
     brand_line = ""
     if brand.get("title") or brand.get("description"):
         brand_line = (f"\nWhat the site says it is: {brand.get('title', '')} — "
                       f"{brand.get('description', '')}")
+    if not links:
+        return (f"The article is for {site.label} ({site.homepage}).{brand_line} No "
+                f"indexed internal-link candidates were found on this site right now, "
+                f"so link only to {site.homepage} once, naturally, and leave "
+                "`internal_links` otherwise empty. Do not invent URLs on this domain — "
+                "a link to a page that does not exist is a 404.")
+    described = "\n".join(f"- {l['url']}  ({l.get('page', '')})" for l in links[:12])
     return (f"The article is for {site.label} ({site.homepage}).{brand_line}\n"
-            f"Link to two or three of these REAL pages, only where they are the genuinely "
-            f"useful next step, with varied descriptive anchor text (never 'click here', "
-            f"never the bare URL). Do not invent any other URL on this domain:\n{described}")
+            f"These are REAL, indexed pages on {site.label}'s own sitemap, ranked most "
+            f"relevant to this topic first (by keyword overlap with the topic). Pick 2 to "
+            f"4 of them for the RELATED TOOLS / PAGES closing section — only ones that are "
+            f"genuinely the useful next step for this reader — with varied descriptive "
+            f"anchor text (never 'click here', never the bare URL). Do not invent any "
+            f"other URL on this domain:\n{described}")
 
 
 def _prompt(topic: str, site, res: Research, links: list, brand: dict,
@@ -229,20 +270,34 @@ TOPIC: {topic}
 {_sources_block(res)}
 
 HOW TO WRITE IT
-1. Answer-first opening of 120-200 words that COMPLETELY answers the main question.
-   A reader — or an AI engine quoting you — should get the whole answer from it.
-   Do not warm up, do not restate the title, no "in today's fast-paced world".
-2. Question-shaped H2/H3 headings, phrased the way people ask them. Under each,
-   open with a self-contained 40-60 word answer block that still makes sense if an
-   engine lifts it out on its own, then expand.
-3. One worked, concrete example with realistic numbers, clearly framed as an example
-   rather than as measured data.
-4. Cite sources inline as markdown links, on the claims that need them.
-5. A short FAQ of 3-6 real questions, each answered in 2-4 tight sentences.
-6. Name {site.label} consistently and describe what it is in one clean sentence
-   somewhere natural. Finish with a short conclusion and one clear call to action.
-7. 1,200-1,800 words. If the topic is fully answered in less, stop — padding hurts.
-   Vary sentence length. Write like a knowledgeable person, not a template.
+Structure it the way {site.label}'s own best pages are structured — the depth and
+specificity of a real tool page, never a thin block of generic claims that could be
+pasted onto any other page on the site unchanged. Six sections, in this order:
+
+1. INTRO — a 120-200 word answer-first opening that COMPLETELY answers the main
+   question on its own. A reader — or an AI engine quoting you — should get the whole
+   answer from it. Do not warm up, do not restate the title, no "in today's fast-paced
+   world".
+2. WHAT IT DOES / WHAT THIS IS — a specific paragraph or two on the thing itself: what
+   it is, how it actually works, what makes it different. Written about THIS topic, not
+   a generic "Key Benefits" list that repeats the same shape across every page on the
+   site — that duplicated-block pattern is exactly what to avoid.
+3. QUICK REFERENCE / HOW-TO STEPS — a numbered how-to or short reference the reader can
+   act on immediately. Use question-shaped H2/H3 headings elsewhere too, phrased the way
+   people actually ask them; under each, open with a self-contained 40-60 word answer
+   block that still makes sense if an engine lifts it out on its own, then expand.
+4. WHEN IT'S USEFUL — real, specific scenarios where this matters (not "great for many
+   purposes" — name the situations).
+5. FAQ — 3-6 real questions, each answered in 2-4 tight sentences.
+6. RELATED TOOLS / PAGES — a short closing section linking to 2-4 of the internal pages
+   above, each with a one-line reason it's the useful next step.
+
+Also: include one worked, concrete example with realistic numbers, clearly framed as an
+example rather than as measured data; cite sources inline as markdown links on the claims
+that need them; name {site.label} consistently and describe what it is in one clean
+sentence somewhere natural. 1,200-1,800 words — if the topic is fully answered in less,
+stop, padding hurts. Vary sentence length. Write like a knowledgeable person, not a
+template.
 
 HARD RULES
 - Invent nothing: no statistic, percentage, price, ranking, study, search volume or
@@ -266,7 +321,7 @@ Only a JSON object, no code fence, with exactly these keys:
   "sources": [{{"claim": "the claim this supports", "url": "the exact research URL"}}],
   "internal_links": [{{"anchor": "the anchor text used", "url": "..."}}],
   "date_modified": "{today}",
-  "body_markdown": "the full article in markdown, starting at the opening paragraph — no H1, the title is separate. Include the FAQ as a '## Frequently asked questions' section.",
+  "body_markdown": "the full article in markdown, starting at the opening paragraph — no H1, the title is separate. Include the FAQ as a '## Frequently asked questions' section and the internal links as a '## Related tools' (or similarly named) closing section.",
   "images": [
     {{"role": "featured", "filename": "keyword-slug-featured.png",
       "prompt": "a clean, modern, uncluttered illustration brief — no text baked in, no fake charts, no real logos or people",

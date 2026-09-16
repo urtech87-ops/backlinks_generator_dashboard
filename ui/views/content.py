@@ -124,15 +124,17 @@ def _c_topic(ctx, coverage_df) -> None:
 
     _keyword_helper(ctx, topic)
 
-    options = agent.internal_link_options(coverage_df, site)
+    keyword = st.session_state.get("content_keyword", "")
+    options = agent.internal_link_options(coverage_df, site, topic, keyword)
     if options:
         st.multiselect(
             "Pages this article should link to", options=[o["url"] for o in options],
             default=[o["url"] for o in options[:4]],
             format_func=lambda u: next((o["page"] for o in options if o["url"] == u), u),
             key="content_internal",
-            help="Only indexed pages are offered. Linking a new article to a page Google "
-                 "has already rejected spreads the problem instead of fixing it.",
+            help="From the live sitemap, indexed pages only — ranked by relevance to "
+                 "your topic, most relevant first. Linking to a page Google has already "
+                 "rejected spreads the problem instead of fixing it.",
         )
     else:
         st.caption("No indexed pages to link to yet, so the article will link to your "
@@ -248,7 +250,7 @@ def _c_research_write(ctx) -> None:
 
     if st.button("🔎 Research and write the draft", type="primary", key="content_write"):
         coverage_df, _ = d.coverage_frame(site)
-        options = agent.internal_link_options(coverage_df, site)
+        options = agent.internal_link_options(coverage_df, site, topic, keyword)
         picked = st.session_state.get("content_internal", [o["url"] for o in options[:4]])
         internal = [o for o in options if o["url"] in picked]
         _run(site, topic, keyword, notes, internal)

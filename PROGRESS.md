@@ -5,11 +5,12 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-16 · **Current phase:** Phase 13 done — **stopped every silent
-live API call, and the Content page now suggests real topics instead of a blank box**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, six scoped additions —
-Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2 and Phase 13 below — on top of Phase 12's UX
-redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-16 · **Current phase:** Phase 14 done — **new articles now
+rank their internal links by relevance instead of sitemap order, and follow the site's
+own tool-page structure instead of a generic template**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, seven scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13 and Phase 14 below — on top of
+Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
 data BEHIND that verdict honest too, by auto-loading live coverage the first time a
@@ -293,6 +294,51 @@ quality content; backlinks are the visible target, not the engine.
       success message and the new row — with no exceptions. Not run against a real
       Hashnode or Medium account: this environment has no platform keys, same as
       dev.to and Blogger before it.
+
+- [x] **Phase 14 — Real internal links + the site's own content structure** — a scoped
+      change to the volume path's writing prompt, `agents/content.py` +
+      `ui/views/content.py`. Two things, both about NEW article output only — nothing
+      here touches or rewrites a live page.
+      **1 · Internal links from the live sitemap, ranked by relevance.**
+      `internal_link_options()` already only offered `Healthy` pages from `coverage_df`
+      — which is itself built from `config.Site.sitemap_url` (read live by
+      `gsc.discover_urls()`) cross-checked against live Search Console indexing via
+      `ui.data.refresh_live()` — so the sitemap-plus-indexing gate was already correct.
+      What it didn't do was rank them: it returned the first N healthy pages in sitemap
+      order. It now takes `topic`/`keyword`, scores every candidate page by keyword
+      overlap between the topic and the page's own URL/slug (new `_topic_words()` /
+      `_slug_words()`, a small stopword list, no external NLP dependency), and sorts
+      most-relevant-first. The Content page's Step 1 multiselect now defaults to the
+      **top 4 by relevance** instead of the first 4 in sitemap order, and Step 2 passes
+      the same topic/keyword when it rebuilds the list to resolve the picked URLs — no
+      new network call anywhere; this still reads only the cache Phase 13 gated behind
+      "Refresh live data". The writer's prompt (`_internal_block()`) now hands the model
+      the top 12 ranked candidates, says plainly they're "ranked most relevant first",
+      and asks for 2 to 4 of them in the article's closing section (previously "two or
+      three" with no ranking).
+      **2 · Match the site's own content structure.** `_prompt()`'s "HOW TO WRITE IT"
+      section was rewritten from a flat numbered list into the six-part shape a real
+      tool page uses: **intro → what it does → quick reference/how-to steps → when it's
+      useful → FAQ → related tools/pages**, with the related-tools section explicitly
+      the 2-4 ranked internal links from change 1. The prompt calls out the anti-pattern
+      by name — a generic "Key Benefits" block repeated with no page-specific
+      substance — and tells the model not to write that. The AEO rules from before
+      (answer-first opening, question-shaped headings with self-contained answer
+      blocks, one worked example, inline-cited sources) are kept, just placed inside
+      the new structure rather than replacing it. `check()` and the "Internal links"/
+      "Question-shaped headings"/"FAQ" rows are unchanged — the new structure is a
+      superset of what they already verify, so a draft that matches it still passes.
+      *Note:* no new test file — the change is a prompt/ranking change with no new
+      branching a human decision depends on, and the existing suite doesn't stub
+      OpenRouter's actual reply content. Verified instead by running
+      `internal_link_options()` directly against a synthetic coverage frame: a topic
+      about "jpeg" content ranks a `/jpeg-compressor` page above an unrelated
+      `/pdf-merger` page, a `Broken`-bucket page is still excluded, and calling it with
+      no topic still returns the same "just the healthy pages" list as before this
+      phase (so the wizard's no-topic-yet caption path is unaffected). `pytest -q` —
+      67/67, unchanged (this environment still has no Google/OpenRouter keys, so the
+      full write→check round-trip against a real model reply is still unverified from
+      here, same limitation every phase has noted).
 
 ## Done so far
 - Repo scaffold, `CLAUDE.md`, `PHASES.md`, this file.
