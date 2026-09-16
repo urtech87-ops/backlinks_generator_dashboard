@@ -5,13 +5,12 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-16 · **Current phase:** Phase 16 done — **generated articles
-now come out in the SELECTED site's own real format — ToolsVenue's tool-page HTML,
-ToolsHall's blog-post HTML, or plain markdown as an explicit fallback — instead of
-plain markdown regardless of site**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, nine scoped additions —
-Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14, Phase 15 and Phase 16
-below — on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-16 · **Current phase:** Phase 17 done — **saved items
+(manual, never lost between sessions) and before/after impact tracking, on a new
+"Saved & Impact" page**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, ten scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14, Phase 15, Phase 16
+and Phase 17 below — on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
 data BEHIND that verdict honest too, by auto-loading live coverage the first time a
@@ -1122,6 +1121,85 @@ quality content; backlinks are the visible target, not the engine.
       posted draft's HTML has been verified by direct inspection of
       `render_toolsvenue()` / `render_toolshall()`'s output against a
       realistic six-section article, not against a live WordPress post.
+
+- [x] **Phase 17 — Save generated items, and before/after impact tracking** —
+      two features, both reported as needed live: generation costs real
+      money and nothing generated was kept between sessions, and there was
+      no way to tell whether a page actually moved after a backlink or an
+      article.
+      **Feature 1 · Saved items (manual).** `core/saved_items.py`, in
+      `core/tracker.py`'s spirit — plain files under `data/`, nothing
+      hidden in a database — but its own shape: a saved item can be a full
+      article, so this writes one JSON file per item, organized
+      `data/saved_items/<site>/<YYYY-MM-DD>/`, plus a light CSV index
+      (`data/saved_items/index.csv`) so browsing doesn't open every file
+      just to show a title. `save_item()` records the full content, the
+      target URL/platform, the type (`article` / `backlink`), the model
+      used and a timestamp; `list_items()` reads the index only (filterable
+      by site/type); `load_item()` opens one file's full content. **Saving
+      is manual only** — nothing here is called except by a "💾 Save"
+      button someone pressed: Content's step 3 review (the edited article,
+      rendered in whatever output format is picked), Backlinks Lane A's
+      step 4 per-platform draft, and Lane B's guest-article editor. A new
+      sidebar page, **"Saved & Impact"** (`ui/views/saved_impact.py`,
+      registered in `ui/views/__init__.py` between Backlinks and Settings),
+      has a "💾 Saved items" tab: a site + type filter, a table of
+      everything saved, and a picker that opens one item's full content in
+      a copyable `st.code` block.
+      **Feature 2 · Before/after impact tracking.** `core/impact.py`, same
+      `data/` convention, its own CSV (`data/tracked_pages.csv`). A page
+      enters tracking two ways, both wired in this phase: automatically —
+      `_track_backlink_target()` in `ui/views/backlinks.py` fires the
+      instant Lane A generates a draft or Lane B drafts a pitch/article for
+      a target page, and `_track_new_article()` in `ui/views/content.py`
+      fires the instant a Content run's WordPress draft is actually
+      created at a real URL — or manually, via the new "➕ I worked on this
+      page" form on the Saved & Impact page's "📈 Impact tracking" tab
+      (paste or pick a URL, no auto-fetch). Either way,
+      `impact.start_tracking()` snapshots whatever `ui.data.performance_metrics()`
+      already has cached for that URL as the baseline (impressions, clicks,
+      position, date) — **never a fresh API call**, respecting `ui/data.py`'s
+      "call Google in exactly one place" rule — and is a no-op if the page
+      is already tracked, so the baseline is set exactly once, at the point
+      the page actually started being worked on, not overwritten by a
+      later run. When nothing was cached yet, the baseline is honestly 0
+      with `baseline_live=False` recorded, not silently presented as a
+      measurement. The tab's comparison (`impact.compare()`) shows every
+      tracked page's baseline + date, latest + date (from the sidebar's
+      last refresh), the change, and days elapsed; under
+      `impact.MIN_DAYS_FOR_A_READ` (14) it shows **"Too early to tell —
+      short-term changes can be noise"** rather than any verdict, and a
+      standing banner states the honest limit plainly: tracking only works
+      forward from the moment a page is added, it cannot reconstruct a
+      baseline for work done before that.
+      **Guardrails kept:** nothing here auto-publishes, auto-fetches, or
+      invents a number — both new modules only ever read whatever the
+      sidebar's Refresh live data already cached. `data/saved_items/` was
+      added to `.gitignore` alongside `data/live_cache/` and the tracker
+      CSVs — this is the user's content, not the app's.
+      *Note:* `tests/test_phase17_saved_items_and_impact.py` (13 new
+      tests, direct unit tests against `core.saved_items` / `core.impact` —
+      both have no Streamlit or network dependency, so this is the fastest
+      way to pin the actual contract): a save persists and reloads
+      byte-for-byte; listing filters by site and by type; a missing file
+      loads as `None` rather than raising; starting tracking snapshots the
+      exact baseline numbers/date passed in; a page already tracked keeps
+      its FIRST baseline when generated for again; a baseline with nothing
+      cached is marked `baseline_live=False`; `compare()` computes change
+      and elapsed days correctly (checked against a known date pair) and
+      returns `has_latest=False` with no invented "change" when nothing's
+      cached for the latest side, and `None` for an untracked page; under
+      14 days is flagged `too_early=True`, 14+ is not. All isolated to a
+      `tmp_path` — never the repo's real `data/`. `pytest -q` — 101/101
+      (88 before this phase, +13 new). Also smoke-tested by hand through
+      Streamlit's `AppTest`: Content, Backlinks and the new Saved & Impact
+      page all render with no exception in sample mode, and the manual "I
+      worked on this page" form actually writes a tracked row that a
+      **second, fresh** `AppTest` session (no shared session_state) still
+      reads back — proving the CSV, not memory, is what's authoritative,
+      the same property `ui/data.py`'s disk cache relies on. Not run
+      against a real Google/OpenRouter credential from here — same
+      limitation every phase before this one has noted.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its

@@ -8,6 +8,8 @@ data/*.json
 data/live_cache/
 # Your backlink tracker is your data, not the app's.
 data/*.csv
+# Saved generated items (Phase 17) — your content, not the app's.
+data/saved_items/
 .streamlit/secrets.toml
 # Claude Code local skill symlinks (if any)
 .agents/skills/

@@ -26,7 +26,7 @@ import streamlit as st
 
 from agents import backlink as bl
 from agents import outreach as out
-from core import config, keywords as kw, mailer, search, tracker
+from core import config, impact, keywords as kw, mailer, saved_items, search, tracker
 from core.classifier import HEALTHY, CRAWL_BUDGET, PLUMBING, CONTENT
 from publishers import PLATFORMS, blogger
 from publishers.base import Article
@@ -306,6 +306,8 @@ def _a_generate(site, targets: list) -> None:
         st.session_state.pop(RESULTS, None)
         for problem in problems:
             st.error(problem)
+        if items:
+            _track_backlink_target(site, target.url)
 
     drafts = st.session_state.get(DRAFTS) or {}
     ready = bool(drafts.get("items")) and drafts.get("site") == site.key \
@@ -384,6 +386,21 @@ def _link_history_warning(site, target) -> None:
                "that's your call, just don't overdo it on one page.", icon="⚠️")
 
 
+def _track_backlink_target(site, target_url: str) -> None:
+    """
+    Feature 2 (Phase 17): the moment a backlink is generated for one of your
+    own pages, start impact tracking on that page automatically, snapshotting
+    whatever performance figures are already cached for it. A no-op if the
+    page is already tracked, so this is safe to call every time a draft is
+    (re)generated for the same target.
+    """
+    baseline = d.performance_metrics(site).get(target_url.rstrip("/"), {})
+    impact.start_tracking(
+        site.key, target_url, impact.REASON_BACKLINK, baseline,
+        baseline_date=d.last_refreshed(site) or dt.date.today().isoformat(),
+    )
+
+
 def _opportunity_icon(target) -> str:
     return "🟢" if target.opportunity == bl.COMPOUND else "🟡"
 
@@ -427,6 +444,18 @@ def _review_and_publish(site, drafts: dict) -> None:
                            "natural; several read as link-building.", icon="🔗")
             if PLATFORMS[key].always_draft:
                 st.caption("🛡️ Posts to your own site are always created as drafts.")
+
+            if st.button("💾 Save this draft", key=f"bl_save_{key}",
+                        help="Keeps a copy on the Saved & Impact page — generating this "
+                             "cost a model call, so it's worth keeping whether or not you "
+                             "publish it."):
+                saved_items.save_item(
+                    site.key, saved_items.TYPE_BACKLINK,
+                    st.session_state.get(f"bl_title_{key}", item["title"]), body,
+                    target_url=drafts["target_url"],
+                    model=config.get("BACKLINK_MODEL", ""), platform=PLATFORMS[key].label,
+                )
+                st.success("Saved.", icon="💾")
 
     st.write("")
     as_draft = st.checkbox(
@@ -955,6 +984,7 @@ def _b_draft(site, target) -> None:
             st.session_state[_key("subject", domain)] = pitch.subject
             st.session_state[_key("body", domain)] = pitch.body
             st.session_state.pop(SENT, None)
+            _track_backlink_target(site, target.url)
         else:
             st.error(pitch.detail)
 
@@ -972,6 +1002,7 @@ def _b_draft(site, target) -> None:
             }
             st.session_state[_key("article_title", domain)] = draft.article.title
             st.session_state[_key("article_body", domain)] = draft.article.body_markdown
+            _track_backlink_target(site, target.url)
         else:
             st.error(draft.detail)
 
@@ -1060,6 +1091,16 @@ def _article_editor(site, target, domain: str) -> None:
             key=_key("article_dl", domain),
             help="Send this to the host once they've said yes. Nothing here posts it "
                  "for you.")
+        if st.button("💾 Save this article", key=_key("article_save", domain),
+                    help="Keeps a copy on the Saved & Impact page — this cost a model "
+                         "call to write, so it's worth keeping even before a host says "
+                         "yes."):
+            saved_items.save_item(
+                site.key, saved_items.TYPE_BACKLINK, st.session_state[title_key], body,
+                target_url=target.url, model=config.get("BACKLINK_MODEL", ""),
+                platform=domain,
+            )
+            st.success("Saved.", icon="💾")
 
 
 # ── Step 5: approve and send ────────────────────────────────────────────────

@@ -13,12 +13,14 @@ cited source is traced back to research this run actually found. Nothing here
 goes live — WordPress is always a draft.
 """
 
+import datetime as dt
+
 import streamlit as st
 
 from agents import content as agent
 from agents import opportunity as opp
 from agents import output_templates as templates
-from core import config, images as image_api, keywords as kw, search
+from core import config, images as image_api, impact, keywords as kw, saved_items, search
 from ui import components as c
 from ui import data as d
 from ui.views import opportunities as opp_ui
@@ -468,11 +470,35 @@ def _c_review(ctx) -> None:
     _output_format_picker(site, run)
 
     st.write("")
+    _save_article_button(site, run)
+
+    st.write("")
     back_col, next_col, _ = st.columns([1, 1, 3])
     with back_col:
         c.wizard_back(STEP_C, 3)
     with next_col:
         c.wizard_next(STEP_C, 3, len(CONTENT_STEPS), label="Images →")
+
+
+def _save_article_button(site, run: dict) -> None:
+    """
+    Feature 1 (Phase 17): a MANUAL save into the saved-items archive, separate
+    from "Save to outputs/ only" on step 5 — this is the one that survives
+    into the Saved & Impact page's browsable list, not just a folder on disk.
+    Nothing here auto-saves; it only runs on this click.
+    """
+    st.caption("Generation costs money — save a copy of this article now so it's never "
+               "lost between sessions, whether or not you go on to publish it.")
+    if st.button("💾 Save this article", key="content_save_item"):
+        edited = _edited_draft(run)
+        fmt = run.get("output_format") or config.output_format(site)
+        rendered = agent.render_output(edited, site, fmt)
+        saved_items.save_item(
+            site.key, saved_items.TYPE_ARTICLE, edited.title, rendered,
+            model=config.get("CONTENT_MODEL", ""), fmt=fmt,
+            extra={"topic": edited.topic},
+        )
+        st.success("Saved. Find it any time on the **Saved & Impact** page.", icon="💾")
 
 
 def _output_format_picker(site, run: dict) -> None:
@@ -611,6 +637,8 @@ def _publish(site, run: dict, rows: list) -> None:
         run["folder"] = str(agent.save_run(site, draft, run["research"], run.get("images"),
                                            result.url if result.ok else "", fmt))
         st.session_state[RUN] = run
+        if result.ok and result.url:
+            _track_new_article(site, result.url)
 
     if cols[1].button("💾 Save to outputs/ only", key="content_save",
                       help="Writes article.md (and article.html, for a site with an HTML "
@@ -633,6 +661,22 @@ def _publish(site, run: dict, rows: list) -> None:
     if run.get("folder"):
         st.caption(f"Run saved to `{run['folder']}` — article.md, meta.json, the research "
                    "brief and any images.")
+
+
+def _track_new_article(site, article_url: str) -> None:
+    """
+    Feature 2 (Phase 17): the moment a new WordPress draft actually exists at
+    a real URL, start impact tracking for it automatically — a brand-new
+    article has no prior history, so its baseline is whatever's cached for
+    it right now (almost always 0, which is the honest starting point, not
+    an invented number). `impact.start_tracking` is a no-op if this URL is
+    already tracked, so this is safe to call on every publish.
+    """
+    baseline = d.performance_metrics(site).get(article_url.rstrip("/"), {})
+    impact.start_tracking(
+        site.key, article_url, impact.REASON_ARTICLE, baseline,
+        baseline_date=d.last_refreshed(site) or dt.date.today().isoformat(),
+    )
 
 
 def _edited_draft(run: dict):
