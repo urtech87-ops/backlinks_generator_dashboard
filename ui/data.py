@@ -1,87 +1,79 @@
 """
 The dashboard's data layer: fetch once, share across pages.
 
-Live coverage comes from the URL Inspection API, which is one call per URL —
-slow and rate-limited — so it only runs when you press "Refresh live data",
-and the result is kept for the rest of the session. Everything else reads
-whatever is already loaded, or falls back to the seed snapshot.
+Every live Google call in this app — Search Console coverage (URL Inspection),
+Search Console performance (Search Analytics) and GA4 — happens in exactly one
+place: `refresh_live()`, wired to the sidebar's "🔄 Refresh live data" button.
+Nothing else in the dashboard calls Google on its own, no matter how many
+times a page reruns or a tab is opened — Streamlit reruns the whole script on
+every interaction, so anything fetched outside this one gate would spend API
+quota on every click, not just "on open". Every page reads whatever this
+button last loaded (or the sample snapshot, before it's ever been pressed)
+and says plainly which one it's showing.
 """
 
 import pandas as pd
 import streamlit as st
 
 from agents import analysis
-from core import config, gsc, seed
+from core import config, ga4, gsc, seed
 from core.classifier import recommend
 
 
-def _state_key(site: config.Site) -> str:
+def _coverage_key(site: config.Site) -> str:
     return f"coverage_{site.key}"
 
 
+def _perf_key(site: config.Site) -> str:
+    return f"perf_{site.key}"
+
+
+def _ga4_key(site: config.Site) -> str:
+    return f"ga4_{site.key}"
+
+
 def has_live(site: config.Site) -> bool:
-    return bool(st.session_state.get(_state_key(site)))
+    return bool(st.session_state.get(_coverage_key(site)))
 
 
-_AUTOLOAD_DONE = "_coverage_autoload_done"      # {site_key, ...} attempted this session
-_AUTOLOAD_RESULT = "_coverage_autoload_result"  # last attempt's outcome, read once
+def has_live_performance(site: config.Site) -> bool:
+    return bool(st.session_state.get(_perf_key(site)))
 
 
-def _autoload_live_coverage(site: config.Site) -> None:
+def has_live_ga4(site: config.Site) -> bool:
+    return bool(st.session_state.get(_ga4_key(site)))
+
+
+_REFRESH_SEQ = "_live_refresh_seq"
+
+
+def refresh_seq() -> int:
     """
-    The bug this closes: a Google key file being present was silently treated
-    as "the numbers are live", when really it only means live data is
-    *available* — nothing had actually replaced the sample snapshot until a
-    human remembered to press "Refresh live data". A connected session that
-    never refreshed showed the old snapshot with nothing on screen saying so,
-    which is how genuinely indexed pages read "Not indexed".
-
-    So: the first time this site's coverage is read in a session, with a key
-    file present, try a live refresh automatically instead of quietly handing
-    back the sample rows. Runs at most once per site per session — success or
-    failure — so a slow or broken sweep can't repeat itself on every rerun;
-    `autoload_result()` is how a page reads back what happened, and
-    `ui.components.stale_coverage_banner()` still fires if this didn't
-    produce live rows (no credentials, or the sweep failed).
+    Bumped on every press of "Refresh live data", whatever the outcome. Pages
+    that memoize a computed report (Overview) fold this into their memo key,
+    so a stale memoized report gets recomputed from the fresh cache the
+    moment you refresh — without a second button press.
     """
-    if not config.credentials_available():
-        return
-    done = st.session_state.setdefault(_AUTOLOAD_DONE, set())
-    if site.key in done:
-        return
-    done.add(site.key)
-    with st.spinner(f"Connected, but {site.label} hasn't been checked yet this "
-                    "session — loading live coverage from Search Console…"):
-        count, message = refresh_live(site)
-    st.session_state[_AUTOLOAD_RESULT] = {"site": site.key, "count": count,
-                                          "message": message}
+    return st.session_state.get(_REFRESH_SEQ, 0)
 
 
-def autoload_result(site: config.Site) -> dict | None:
+def refresh_live(site: config.Site, start: str = "", end: str = "") -> tuple[int, str]:
     """
-    The outcome of this session's automatic first load for this site (see
-    `_autoload_live_coverage`), read once by whichever data screen opens
-    first, then cleared so a second page doesn't repeat the same notice.
-    """
-    stored = st.session_state.get(_AUTOLOAD_RESULT)
-    if not stored or stored.get("site") != site.key:
-        return None
-    st.session_state.pop(_AUTOLOAD_RESULT, None)
-    return stored
+    The one place this dashboard calls Google. Pulls live coverage (URL
+    Inspection), and — when a date range is given — live Search Console
+    performance (Search Analytics) and GA4, and caches all of it for the rest
+    of the session. Never raises: on failure it returns 0 and an explanation,
+    and whatever was cached before stays in place.
 
-
-def refresh_live(site: config.Site) -> tuple[int, str]:
+    Returns (row_count, message). `row_count` is the number of URLs Search
+    Console actually gave a real coverage verdict for — a URL Inspection call
+    that errors (auth, quota, a property/URL mismatch) is stored too, as a
+    "Couldn't check" row, but does NOT count toward `row_count`, so a refresh
+    where every single call failed correctly reports as a failure rather than
+    a false success.
     """
-    Pull live coverage for a site. Returns (row_count, message). Never raises —
-    on failure it returns 0 and an explanation, and the seed stays in place.
+    st.session_state[_REFRESH_SEQ] = st.session_state.get(_REFRESH_SEQ, 0) + 1
 
-    `row_count` is the number of URLs Search Console actually gave a real
-    verdict for. A URL Inspection call that errors (auth, quota, a
-    property/URL mismatch) is stored too — as a "Couldn't check" row, never
-    silently folded into "not indexed" — but it does NOT count toward
-    `row_count`, so a refresh where every single call failed correctly reports
-    as a failure (0, an error message) rather than a false success.
-    """
     if not config.credentials_available():
         return 0, ("No Google service-account file found. Add it on the Settings page, "
                    "then try again.")
@@ -108,7 +100,7 @@ def refresh_live(site: config.Site) -> tuple[int, str]:
 
     # Every row is kept — including failed ones, marked so the classifier puts
     # them in the honest "Couldn't check" bucket instead of "not indexed".
-    st.session_state[_state_key(site)] = ok + [
+    st.session_state[_coverage_key(site)] = ok + [
         (url, f"Couldn't check: {error}") for url, error in failed
     ]
 
@@ -118,21 +110,107 @@ def refresh_live(site: config.Site) -> tuple[int, str]:
                    f"{sample} — that's an API failure, not a real answer from Google. "
                    "None of these pages should be read as 'not indexed'. Run Settings → "
                    "Test connections to see exactly which step is failing.")
+
+    perf_note = _refresh_performance(site, start, end)
+    ga4_note = _refresh_ga4(site, start, end)
+    extra = (" " + perf_note if perf_note else "") + (" " + ga4_note if ga4_note else "")
+
     if failed:
         sample = f' (e.g. "{failed[0][1]}")' if failed[0][1] else ""
         return len(ok), (f"Loaded live coverage for {len(ok)} URLs — {len(failed)} couldn't "
                          f"be checked{sample} and are marked \"Couldn't check\" on the Fix "
-                         "Plan rather than counted as not indexed.")
-    return len(ok), f"Loaded live coverage for {len(ok)} URLs."
+                         f"Plan rather than counted as not indexed.{extra}")
+    return len(ok), f"Loaded live coverage for {len(ok)} URLs.{extra}"
+
+
+def _refresh_performance(site: config.Site, start: str, end: str) -> str:
+    """Search Console Search Analytics, cached for the rest of the session."""
+    if not (start and end):
+        return ""
+    pages = gsc.search_analytics(site.gsc_property, start, end, ["page"], row_limit=500)
+    queries = gsc.search_analytics(site.gsc_property, start, end, ["query"], row_limit=500)
+    page_queries = gsc.search_analytics(site.gsc_property, start, end, ["page", "query"],
+                                        row_limit=1000)
+    st.session_state[_perf_key(site)] = {
+        "range": f"{start} → {end}", "start": start, "end": end,
+        "pages": pages, "queries": queries, "page_queries": page_queries,
+    }
+    return f"Performance loaded for {len(pages)} pages and {len(queries)} searches."
+
+
+def _refresh_ga4(site: config.Site, start: str, end: str) -> str:
+    """GA4's four reports, cached for the rest of the session."""
+    if not (start and end and config.ga4_ready(site)):
+        return ""
+    st.session_state[_ga4_key(site)] = {
+        "range": f"{start} → {end}",
+        "summary": ga4.summary(site.ga4_property_id, start, end),
+        "channels": ga4.channels(site.ga4_property_id, start, end),
+        "countries": ga4.countries(site.ga4_property_id, start, end),
+        "top_pages": ga4.top_pages(site.ga4_property_id, start, end),
+    }
+    return "GA4 refreshed."
+
+
+def performance_cache(site: config.Site) -> dict | None:
+    """The last-refreshed Search Console performance for this site, or None."""
+    return st.session_state.get(_perf_key(site))
+
+
+def performance_metrics(site: config.Site) -> dict:
+    """{url without trailing slash: Search Analytics row}. {} until refreshed."""
+    cache = performance_cache(site)
+    if not cache:
+        return {}
+    out = {}
+    for row in cache.get("pages") or []:
+        url = (row.get("page") or "").rstrip("/")
+        if url:
+            out[url] = row
+    return out
+
+
+def performance_pages(site: config.Site) -> list:
+    return (performance_cache(site) or {}).get("pages") or []
+
+
+def performance_queries(site: config.Site) -> list:
+    return (performance_cache(site) or {}).get("queries") or []
+
+
+def performance_page_queries(site: config.Site) -> list:
+    """Raw page+query Search Analytics rows — what `core.keywords` needs for
+    per-page keyword lookups, without fetching them again."""
+    return (performance_cache(site) or {}).get("page_queries") or []
+
+
+def performance_range(site: config.Site) -> str:
+    return (performance_cache(site) or {}).get("range", "")
+
+
+def keywords(site: config.Site) -> list:
+    """
+    Every query this site's cached performance covers, as `core.keywords`
+    `Keyword` objects — built from whatever the last refresh loaded, with no
+    network call of its own. [] until a refresh has actually run.
+    """
+    from core import keywords as kw
+    cache = performance_cache(site)
+    if not cache:
+        return []
+    found = kw.gsc_keywords(site, cache.get("start", ""), cache.get("end", ""),
+                            rows=cache.get("queries"), page_rows=cache.get("page_queries"))
+    return found["keywords"] if found["ok"] else []
+
+
+def ga4_cache(site: config.Site) -> dict | None:
+    """The last-refreshed GA4 reports for this site, or None until refreshed."""
+    return st.session_state.get(_ga4_key(site))
 
 
 def coverage_rows(site: config.Site) -> tuple[list, str]:
-    """[(url, coverage_state), ...] plus 'live' or 'seed'."""
-    live = st.session_state.get(_state_key(site))
-    if live:
-        return live, "live"
-    _autoload_live_coverage(site)
-    live = st.session_state.get(_state_key(site))
+    """[(url, coverage_state), ...] plus 'live' or 'seed'. Never touches the network."""
+    live = st.session_state.get(_coverage_key(site))
     if live:
         return live, "live"
     return seed.seed_rows(site.key, site.homepage), "seed"

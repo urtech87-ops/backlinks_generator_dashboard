@@ -343,31 +343,42 @@ def finish(kw: Keyword) -> Keyword:
 
 
 # ── 1. Search Console (the first and best source) ──────────────────────────
-def gsc_keywords(site, start: str, end: str, row_limit: int = 500) -> dict:
+def gsc_keywords(site, start: str, end: str, row_limit: int = 500,
+                 rows: list = None, page_rows: list = None) -> dict:
     """
     Every query this site got impressions for, as Keywords.
     Returns {'ok', 'keywords', 'detail'} — no credentials is not an error, it
     just means there's nothing first-party to work from yet.
+
+    Pass `rows` (query-dimension Search Analytics rows) when the caller
+    already has them cached — this dashboard only ever calls Google from one
+    place (the sidebar's "Refresh live data" button), so every other reader
+    of query data hands its cached rows in here rather than re-fetching.
+    `page_rows` does the same for `page_map()`'s page+query rows. Leave both
+    out and this fetches live itself, for callers that are themselves an
+    explicit, one-off user action (e.g. the Opportunities page's own
+    "Load my Search Console queries" button).
     """
     if not enabled():
         return {"ok": False, "keywords": [],
                 "detail": "The keyword engine is switched off in Settings."}
-    if not config.credentials_available():
-        return {"ok": False, "keywords": [],
-                "detail": "No Google service-account file, so Search Console query data "
-                          "isn't available. Everything below is unvalidated until it is."}
 
-    rows = gsc.search_analytics(site.gsc_property, start, end, ["query"],
-                                row_limit=row_limit)
+    if rows is None:
+        if not config.credentials_available():
+            return {"ok": False, "keywords": [],
+                    "detail": "No Google service-account file, so Search Console query "
+                              "data isn't available. Everything below is unvalidated "
+                              "until it is."}
+        rows = gsc.search_analytics(site.gsc_property, start, end, ["query"],
+                                    row_limit=row_limit)
     if not rows:
         return {"ok": False, "keywords": [],
-                "detail": "Search Console returned no queries for this date range. Either "
-                          "the site genuinely has no impressions yet, or the service "
-                          "account can't read this property — Settings → Test connections "
-                          "says which."}
+                "detail": "No Search Console queries loaded for this date range yet. "
+                          "Press Refresh live data in the sidebar, or the site genuinely "
+                          "has no impressions yet."}
 
     brands = brand_terms(site)
-    pages = page_map(site, start, end)
+    pages = page_map(site, start, end, rows=page_rows)
     out = []
     for row in rows:
         query = (row.get("query") or "").strip()
@@ -388,12 +399,18 @@ def gsc_keywords(site, start: str, end: str, row_limit: int = 500) -> dict:
             "detail": f"{len(out)} real queries from Search Console for {start} → {end}."}
 
 
-def page_map(site, start: str, end: str, row_limit: int = 1000) -> dict:
-    """query (lowercased) → the URL of yours that ranks for it. {} without creds."""
-    if not config.credentials_available():
-        return {}
-    rows = gsc.search_analytics(site.gsc_property, start, end, ["page", "query"],
-                                row_limit=row_limit)
+def page_map(site, start: str, end: str, row_limit: int = 1000,
+            rows: list = None) -> dict:
+    """
+    query (lowercased) → the URL of yours that ranks for it. {} without creds.
+    Pass `rows` (already-fetched page+query Search Analytics rows) to use
+    those instead of fetching live — see `gsc_keywords()`'s docstring.
+    """
+    if rows is None:
+        if not config.credentials_available():
+            return {}
+        rows = gsc.search_analytics(site.gsc_property, start, end, ["page", "query"],
+                                    row_limit=row_limit)
     best = {}
     for row in rows:
         query = (row.get("query") or "").strip().lower()
@@ -412,16 +429,23 @@ def striking_distance(keywords: list, min_impressions: int = MIN_IMPRESSIONS) ->
             if k.band == STRIKING and k.impressions >= min_impressions]
 
 
-def for_page(site, url: str, start: str, end: str, limit: int = 8) -> list:
+def for_page(site, url: str, start: str, end: str, limit: int = 8,
+            rows: list = None) -> list:
     """
     The queries one specific page of yours ranks for, best first. This is what
     the backlink targeter shows: *why* this page deserves a link, in the user's
     own Search Console numbers rather than a score out of nowhere.
+
+    Pass `rows` (already-fetched page+query Search Analytics rows) to use
+    those instead of fetching live — see `gsc_keywords()`'s docstring.
     """
-    if not (enabled() and config.credentials_available() and url):
+    if not (enabled() and url):
         return []
-    rows = gsc.search_analytics(site.gsc_property, start, end, ["page", "query"],
-                                row_limit=1000)
+    if rows is None:
+        if not config.credentials_available():
+            return []
+        rows = gsc.search_analytics(site.gsc_property, start, end, ["page", "query"],
+                                    row_limit=1000)
     wanted = url.rstrip("/")
     brands = brand_terms(site)
     out = []

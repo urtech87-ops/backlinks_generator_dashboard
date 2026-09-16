@@ -46,7 +46,6 @@ def render(ctx) -> None:
     )
 
     df, source = d.coverage_frame(site)
-    c.autoload_notice(d.autoload_result(site))
     c.stale_coverage_banner(source, ctx.creds)
     summary = d.health_summary(df)
     counts = summary["counts"]
@@ -105,7 +104,8 @@ def _lane_a(ctx, coverage_df: pd.DataFrame) -> None:
     with st.expander("Platform readiness", expanded=not ready_now):
         _platform_readiness(site)
 
-    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end)
+    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end,
+                                           metrics=d.performance_metrics(site))
     if not targets:
         c.empty_state(
             "No link-eligible pages yet",
@@ -350,8 +350,12 @@ def _target_keywords(ctx, target) -> None:
     """
     if not (kw.enabled() and ctx.creds):
         return
-    found = kw.for_page(ctx.site, target.url, ctx.start, ctx.end)
+    found = kw.for_page(ctx.site, target.url, ctx.start, ctx.end,
+                        rows=d.performance_page_queries(ctx.site))
     if not found:
+        if not d.has_live_performance(ctx.site):
+            st.caption("Press **Refresh live data** in the sidebar to see which "
+                       "searches this page is closest on.")
         return
     striking = kw.striking_distance(found)
     st.caption("**Keywords this page is closest on** — from your own Search Console data, "
@@ -556,7 +560,8 @@ def _lane_b(ctx, coverage_df: pd.DataFrame) -> None:
     c.wizard_steps(LANE_B_STEPS, step)
     st.divider()
 
-    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end)
+    targets, rank_source = bl.rank_targets(site, coverage_df, ctx.start, ctx.end,
+                                           metrics=d.performance_metrics(site))
     target = _b_target(targets)
 
     if step == 1:

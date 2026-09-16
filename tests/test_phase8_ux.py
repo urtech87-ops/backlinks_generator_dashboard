@@ -162,31 +162,26 @@ def test_onboarding_strip_is_present_and_tracks_state(disconnected):
     assert "you are here" in text          # step 1, because nothing is connected
 
 
-# ── Connecting replaces the sample with live data ──────────────────────────
-def test_connecting_auto_loads_live_coverage(connected):
+# ── Connecting never calls Google until you press the button ───────────────
+def test_connecting_does_not_auto_load_live_coverage(connected):
     """
-    The stale-data bug this guards against: a Google key file being present
-    used to mean nothing changed on screen until a human remembered to press
-    Refresh live data — so a connected session could keep showing the old
-    sample snapshot, with nothing saying so, and an indexed page could read
-    "Not indexed" simply because nobody had refreshed yet. The first data
-    screen opened in a session now loads live coverage automatically instead.
+    This dashboard calls Google in exactly one place: the sidebar's "Refresh
+    live data" button. Having a key file on disk must never, on its own,
+    trigger a live call — landing on a connected-but-unrefreshed session
+    still shows the sample snapshot, loudly marked as such, rather than
+    quietly fetching on page load (which would spend API quota on every
+    single rerun, not just "on open").
     """
     at = connected()
 
-    rows = at.session_state["coverage_toolsvenue"]
-    assert rows == LIVE_COVERAGE
+    assert "coverage_toolsvenue" not in at.session_state
     text = _text(at)
-    assert "Live data from Search Console" in text
-    assert "SAMPLE data" not in text
-    assert "Loaded live coverage for 4 URLs" in text   # the auto-load notice
-
-    tracked = next(m for m in at.metric if m.label == "Pages tracked")
-    assert tracked.value == str(len(LIVE_COVERAGE))
+    assert "SAMPLE data" in text or "Showing sample data" in text
+    assert "Live data from Search Console" not in text
 
 
-def test_refresh_button_still_works_after_the_auto_load(connected):
-    """The manual button is still there and still works, on top of the auto-load."""
+def test_refresh_button_loads_live_coverage(connected):
+    """The one button that's allowed to call Google actually works."""
     at = _refresh(connected())
     rows = at.session_state["coverage_toolsvenue"]
     assert rows == LIVE_COVERAGE
@@ -196,17 +191,18 @@ def test_refresh_button_still_works_after_the_auto_load(connected):
 def test_stale_sample_never_shown_when_connected_but_refresh_fails(monkeypatch):
     """
     Credentials present, but Search Console can't actually be reached (auth,
-    quota, whatever) — the auto-load fails, and the page must say so loudly
-    rather than quietly falling back to the sample snapshot looking no
-    different than usual.
+    quota, whatever). Nothing auto-fetches on page load, so the failure only
+    shows up once you press Refresh live data — and when it does, the page
+    must say so loudly rather than quietly falling back to the sample
+    snapshot looking no different than usual.
     """
     monkeypatch.setattr(config, "credentials_available", lambda: True)
     monkeypatch.setattr(gsc, "discover_urls", lambda sitemap, limit=500: [])
     monkeypatch.setattr(gsc, "search_analytics", _search_analytics)
-    at = _run()
+    at = _refresh(_run())
     text = _text(at)
-    assert "Tried to load live coverage automatically" in text
-    assert "Showing sample data" in text
+    assert "Couldn't read any URLs" in text
+    assert "Showing sample data" in text or "SAMPLE data" in text
 
 
 def test_live_performance_shows_without_pressing_run(connected):

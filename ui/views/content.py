@@ -16,9 +16,11 @@ goes live — WordPress is always a draft.
 import streamlit as st
 
 from agents import content as agent
+from agents import opportunity as opp
 from core import config, images as image_api, keywords as kw, search
 from ui import components as c
 from ui import data as d
+from ui.views import opportunities as opp_ui
 
 RUN = "content_run"          # session state: the current topic → draft → images run
 CHECK_LABEL = {"ok": "pass", "warn": "check", "bad": "fix this"}
@@ -97,6 +99,8 @@ def _c_topic(ctx, coverage_df) -> None:
         st.success(f"Filled in from {handed_over}. Edit anything below before you run it.",
                    icon="💡")
 
+    _suggested_topics(ctx)
+
     topic = st.text_input(
         "Topic", key="content_topic",
         placeholder="e.g. How do you compress a JPEG without visible quality loss?",
@@ -140,6 +144,83 @@ def _c_topic(ctx, coverage_df) -> None:
         c.wizard_next(STEP_C, 1, len(CONTENT_STEPS), disabled=not topic.strip(),
                       help="Enter a topic first." if not topic.strip() else "",
                       label="Research & write →")
+
+
+def _suggested_topics(ctx) -> None:
+    """
+    Real suggestions instead of a blank box, from two sources:
+
+      · Search Console queries this site gets impressions for but ranks
+        poorly on (position 20+) — `core.keywords`' DEEP band, read from
+        whatever the sidebar's Refresh live data last cached. No network
+        call of its own.
+      · Competitor content gaps, reused from the Opportunity Finder's own
+        scan logic — pulled from this session's last scan if one has been
+        run, never re-scraped from here.
+
+    Picking one fills the topic (and keyword) box below; typing your own
+    still works exactly as before. Nothing here writes or researches
+    anything by itself — it only suggests.
+    """
+    site = ctx.site
+    suggestions = []
+
+    deep = sorted((k for k in d.keywords(site) if k.band == kw.DEEP),
+                 key=lambda k: -k.impressions)
+    for k in deep[:5]:
+        suggestions.append({
+            "topic": k.keyword, "keyword": k.keyword, "source": "🔍 Search Console",
+            "reason": f"You get {k.impressions:,} impressions for “{k.keyword}” "
+                      f"but rank at position {k.position} — write this.",
+        })
+
+    scanned = st.session_state.get(opp_ui.SCAN) or {}
+    has_scan = scanned.get("site") == site.key and bool(scanned.get("result"))
+    if has_scan:
+        gaps = sorted((o for o in scanned["result"].opportunities if o.kind == opp.GAP),
+                     key=lambda o: -o.score)
+        for o in gaps[:5]:
+            suggestions.append({
+                "topic": o.topic, "keyword": o.keyword, "source": "🕳️ Competitor gap",
+                "reason": o.reasons[0] if o.reasons else
+                          "Competitors cover this and you don't.",
+            })
+
+    with st.expander("💡 Suggested topics, from real data", expanded=bool(suggestions)):
+        if not suggestions:
+            if not kw.enabled():
+                st.caption("The keyword engine is off, so there's nothing to suggest "
+                           "from Search Console yet. Turn it on in Settings → Content "
+                           "tools.")
+            elif not d.has_live_performance(site):
+                st.caption("No suggestions yet — refresh live data to get suggestions. "
+                           "Press **Refresh live data** in the sidebar to pull the "
+                           "Search Console queries you rank poorly on.")
+            else:
+                st.caption("Nothing ranks poorly with real impressions right now, and "
+                           "no competitor scan has been run this session. Nice "
+                           "problem to have — write your own topic below.")
+            c.nav_button("Find competitor gaps in Opportunities", "Opportunities",
+                         key="content_suggest_opp")
+            return
+
+        st.caption("Pick one to fill the topic box below, or write your own — nothing "
+                   "here researches or writes anything until you press the button "
+                   "on the next step.")
+        for i, s in enumerate(suggestions):
+            cols = st.columns([5, 1])
+            with cols[0]:
+                st.markdown(f"**{s['topic']}**")
+                st.caption(f"{s['source']} — {s['reason']}")
+            with cols[1]:
+                st.button("Use this", key=f"content_suggest_{i}", width="stretch",
+                          on_click=lambda s=s: st.session_state.update({
+                              "content_topic": s["topic"],
+                              "content_keyword": s.get("keyword", ""),
+                          }))
+        if not has_scan:
+            c.nav_button("Find competitor gaps too", "Opportunities",
+                         key="content_suggest_opp2")
 
 
 # ── Step 2: research + write ────────────────────────────────────────────────

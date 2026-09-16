@@ -8,23 +8,25 @@ stale sample coverage — until the user thought to press "Refresh live data"
 by hand. Nothing on screen said the numbers were stale, so a non-expert user
 had no reason to distrust them.
 
-The fix, in three parts:
-  1. `ui.data.coverage_rows()` now auto-loads live coverage the first time a
-     site's data is read in a session, whenever a Google key file is present
-     — a connected session no longer silently hands back the sample rows
-     just because nobody pressed the button yet.
-  2. `ui.components.stale_coverage_banner()` is a loud, in-content warning
+Phase 11-fix-2's original fix made a connected session auto-load live
+coverage the first time a site's data was read. Phase 13 removed that: this
+dashboard now calls Google in exactly one place — the sidebar's "Refresh
+live data" button — because auto-loading "on first open" actually meant
+"on every rerun" (Streamlit reruns the whole script on any interaction),
+which spent API quota far more than the name suggested. The original bug
+this file guards against is closed a different way instead:
+  1. `ui.components.stale_coverage_banner()` is a loud, in-content warning
      (not just the small badge `data_source_note()` already drew) that fires
-     specifically in the one case that used to be invisible: credentials are
-     connected, but this session is still on the sample snapshot (the
-     auto-load hasn't run yet, or it ran and failed).
-  3. Verdicts computed from sample coverage are marked "(sample)" wherever
+     in the ordinary state a connected session starts every page in: nobody
+     has pressed "Refresh live data" *this session* yet, so every number on
+     screen is still the sample snapshot.
+  2. Verdicts computed from sample coverage are marked "(sample)" wherever
      they're shown, so a sample-derived verdict can never look exactly like
      a live one — on the Overview's winners list and the Analysis
      Performance tab alike.
 
-This file drives all three through Streamlit's AppTest, across the Overview,
-Analysis and Backlinks pages named in the bug report.
+This file drives both through Streamlit's AppTest, across the Overview,
+Analysis and Backlinks pages named in the original bug report.
 """
 
 import sys
@@ -75,6 +77,14 @@ def _run(page: str) -> AppTest:
     return at
 
 
+def _refresh(at: AppTest) -> AppTest:
+    """Press the sidebar's 'Refresh live data', as a user would."""
+    button = next(b for b in at.sidebar.button if "Refresh" in b.label)
+    button.click().run()
+    assert not at.exception, [str(e.value) for e in at.exception]
+    return at
+
+
 def _text(at: AppTest) -> str:
     parts = [el.value for el in at.markdown]
     parts += [el.value for el in at.caption]
@@ -99,36 +109,51 @@ def stub_live(monkeypatch):
 
 @pytest.fixture
 def stub_broken(monkeypatch):
-    """Credentials present, but the sitemap can't be read — auto-load fails."""
+    """Credentials present, but the sitemap can't be read — the refresh fails."""
     monkeypatch.setattr(config, "credentials_available", lambda: True)
     monkeypatch.setattr(gsc, "discover_urls", lambda sitemap, limit=500: [])
     monkeypatch.setattr(gsc, "search_analytics", _search_analytics)
 
 
-# ── 1. Auto-load fires on every data screen, not just Overview ─────────────
+# ── 1. No data screen ever calls Google before you press the one button ────
 @pytest.mark.parametrize("page", ["Overview", "Analysis", "Backlinks"])
-def test_connected_screens_auto_load_live_coverage(stub_live, page):
+def test_connected_screens_never_auto_load_live_coverage(stub_live, page):
+    """
+    Credentials on disk must never, on their own, trigger a live call —
+    every data screen shows the loud stale-sample banner and nothing on
+    session_state until you press Refresh live data. (Streamlit reruns the
+    whole script on any interaction, so "loads on open" would actually mean
+    "loads on every click" — the exact quota burn this closes.)
+    """
     at = _run(page)
+    assert "coverage_toolsvenue" not in at.session_state
+    text = _text(at)
+    assert "Live data from Search Console" not in text
+    assert "Showing sample data" in text
+
+
+@pytest.mark.parametrize("page", ["Overview", "Analysis", "Backlinks"])
+def test_connected_screens_load_live_coverage_on_refresh(stub_live, page):
+    at = _run(page)
+    at = _refresh(at)
     assert at.session_state["coverage_toolsvenue"] == LIVE_COVERAGE
     text = _text(at)
     assert "Live data from Search Console" in text
     assert "Showing sample data" not in text
-    assert "Loaded live coverage for 4 URLs" in text
 
 
 @pytest.mark.parametrize("page", ["Overview", "Analysis", "Backlinks"])
-def test_connected_screens_warn_loudly_when_auto_load_fails(stub_broken, page):
+def test_connected_screens_warn_loudly_when_refresh_fails(stub_broken, page):
     """
-    Auto-load can't always succeed (bad sitemap URL, quota, auth). When it
+    A refresh can't always succeed (bad sitemap URL, quota, auth). When it
     doesn't, the page must say so loudly and keep saying the coverage on
     screen is the sample snapshot — never fall back to a quiet, unmarked
     sample view that looks the same as a genuinely live one.
     """
-    at = _run(page)
+    at = _refresh(_run(page))
     text = _text(at)
-    assert "Tried to load live coverage automatically" in text
+    assert "Couldn't read any URLs" in text
     assert "Showing sample data" in text
-    assert "press Refresh live data" in text.lower() or "Refresh live data" in text
 
 
 # ── 2. Sample-derived verdicts are marked, never shown as confident live ───
@@ -164,15 +189,13 @@ def test_with_verdicts_empty_coverage_is_not_mislabelled_sample():
 
 
 # ── 4. The exact reported site: ToolsHall, which has no seed at all ────────
-def test_toolshall_auto_loads_instead_of_starting_empty(monkeypatch):
+def test_toolshall_starts_empty_then_loads_live_on_refresh(monkeypatch):
     """
-    ToolsHall has no entry in `core.seed.SEED_BY_SITE`, so before this fix a
-    fresh session started from an EMPTY coverage frame — not even a stale
-    sample, just nothing — until "Refresh live data" was pressed by hand,
-    which is what let its genuinely indexed pages read "Couldn't check yet"
-    (or worse, "Not indexed", before the earlier Phase 11-fix) on first open.
-    `coverage_rows()` should now auto-load on the very first read instead of
-    handing back nothing.
+    ToolsHall has no entry in `core.seed.SEED_BY_SITE`, so a fresh session
+    starts from an EMPTY coverage frame — not even a stale sample, just
+    nothing — until "Refresh live data" is pressed by hand. That's read
+    honestly as "Couldn't check yet" (Phase 11-fix), never as a confirmed
+    "not indexed" — and pressing the button replaces it with the real thing.
     """
     import streamlit as st
     st.session_state.clear()
@@ -184,6 +207,13 @@ def test_toolshall_auto_loads_instead_of_starting_empty(monkeypatch):
     monkeypatch.setattr(gsc, "inspect_urls",
                         lambda prop, urls, progress=None:
                         [(ts_url, "Submitted and indexed", "")])
+
+    rows, source = d.coverage_rows(site)
+    assert source == "seed"
+    assert rows == []
+
+    count, _ = d.refresh_live(site)
+    assert count == 1
 
     rows, source = d.coverage_rows(site)
     assert source == "live"
@@ -206,4 +236,4 @@ def test_stale_coverage_banner_quiet_when_not_connected(monkeypatch):
     at = _run("Analysis")
     text = _text(at)
     assert "These numbers are SAMPLE data" in text     # connect_banner
-    assert "Tried to load live coverage automatically" not in text
+    assert "Showing sample data — press Refresh live data" not in text

@@ -76,9 +76,11 @@ else:
                        "from a saved 16 Aug snapshot — not from Google today.")
 
 if st.sidebar.button("🔄 Refresh live data", disabled=not creds, width="stretch",
-                     help="Re-checks every URL in your sitemap with the Search Console "
-                          "URL Inspection API. Takes a minute on a big site."):
-    count, message = d.refresh_live(site)
+                     help="The only thing in this dashboard that calls Google: "
+                          "re-checks every URL with Search Console's URL Inspection "
+                          "API, then loads Search Console performance and GA4 for "
+                          "the date range below. Takes a minute on a big site."):
+    count, message = d.refresh_live(site, start_d.isoformat(), end_d.isoformat())
     (st.sidebar.success if count else st.sidebar.error)(message)
 
 if d.has_live(site):

@@ -1,17 +1,18 @@
 """
 Analysis agent — the triage everything else is conducted from (Phase 7).
 
-This is the module the Overview page runs. It fetches almost nothing of its
-own: coverage comes from the frame the dashboard already loaded, performance
-from `core.gsc`, queries from `core.keywords`, and link-eligibility from
+This is the module the Overview page runs. It calls no API of its own: coverage,
+performance and queries are all read-only inputs the caller already has from
+`ui.data`'s cache — the sidebar's "Refresh live data" button is the only thing
+in this dashboard that ever calls Google — and link-eligibility comes from
 `agents.backlink.rank_targets` (the same ranking the Backlinks page uses). What
-it adds is the **ordering** — which pages to touch first, and which page of the
-dashboard does that job — so Overview can hand a specific URL to the writer or
-the backlink targeter instead of just naming a bucket.
+this module adds is the **ordering** — which pages to touch first, and which
+page of the dashboard does that job — so Overview can hand a specific URL to
+the writer or the backlink targeter instead of just naming a bucket.
 
 Two rules it keeps, both from CLAUDE.md:
 
-  · **No invented numbers.** With no Search Console credentials the report is
+  · **No invented numbers.** With no performance data loaded, the report is
     built from coverage alone, `source` says `coverage-only`, and the ordering
     is by bucket rather than by performance. Nothing is filled in with a guess.
   · **Links come last.** Broken URLs, then rejected content, then crawl budget,
@@ -24,7 +25,7 @@ import datetime as dt
 
 from agents import backlink as bl
 from agents.opportunity import topic_from_url
-from core import config, gsc, keywords as kw, openrouter
+from core import config, keywords as kw, openrouter
 from core.classifier import PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, UNKNOWN
 
 # ── The five things a page can need ────────────────────────────────────────
@@ -380,23 +381,6 @@ def health(coverage_df) -> dict:
     }
 
 
-# ── Performance, read once and shared ──────────────────────────────────────
-def page_metrics(site, start: str, end: str) -> dict:
-    """
-    {url without trailing slash: Search Analytics row}. Empty without
-    credentials — which is a state, not a failure.
-    """
-    if not (start and end and config.credentials_available()):
-        return {}
-    out = {}
-    for row in gsc.search_analytics(site.gsc_property, start, end, ["page"],
-                                    row_limit=500):
-        url = (row.get("page") or "").rstrip("/")
-        if url:
-            out[url] = row
-    return out
-
-
 def _performance_summary(metrics: dict, keywords: list) -> dict:
     """Site-wide totals from rows we actually fetched. No metrics → empty dict."""
     if not metrics:
@@ -719,13 +703,21 @@ def _steps(counts: dict, recommendations: list) -> list:
 # ── The run ────────────────────────────────────────────────────────────────
 def run(site, coverage_df, start: str = "", end: str = "", live: bool = True,
         use_keywords: bool = True, coverage_source: str = "seed",
-        progress=None) -> Report:
+        progress=None, metrics: dict = None, keywords: list = None) -> Report:
     """
     The whole analysis, in one call. Never raises: every source that isn't
     available leaves a note and the rest of the report is still built.
 
-    `live=False` skips the network entirely, which is what the page uses for its
-    first paint — the ordering from coverage alone is still useful.
+    This function makes no network calls of its own — `metrics` (Search
+    Console performance, {url: row}) and `keywords` (the queries this site
+    gets impressions for) are read-only inputs the caller already has, from
+    `ui.data`'s cache. The only thing that ever calls Google is the sidebar's
+    "Refresh live data" button; this just orders whatever it last loaded.
+
+    `live=False` ignores any `metrics`/`keywords` passed in and builds from
+    coverage alone — what the page uses before anything has ever been
+    refreshed. `live=True` with nothing cached yet (`metrics=None`) behaves
+    the same way: there's nothing live to rank on.
     """
     def step(fraction: float, message: str) -> None:
         if progress:
@@ -750,30 +742,28 @@ def run(site, coverage_df, start: str = "", end: str = "", live: bool = True,
     report.health = health(coverage_df)
     counts = report.health["counts"]
 
-    # ── Performance, fetched once and shared with every builder below ──────
-    metrics = {}
-    if live:
-        step(0.15, "Reading Search Console performance…")
-        metrics = page_metrics(site, start, end)
-        if not metrics:
-            report.notes.append(
-                "No Search Console performance figures for this range, so pages are "
-                "ordered by what needs doing rather than by traffic. That ordering is "
-                "unvalidated — connect Search Console in Settings to rank on real "
-                "impressions."
-                if config.credentials_available() else
-                "No Google service-account file, so there are no performance figures. "
-                "Everything below is read from your coverage snapshot alone.")
+    # ── Performance — whatever the sidebar's refresh already cached ────────
+    step(0.15, "Sorting your pages into what each one needs…")
+    metrics = (metrics or {}) if live else {}
+    if not metrics:
+        report.notes.append(
+            "No Search Console performance figures loaded yet, so pages are ordered "
+            "by what needs doing rather than by traffic. That ordering is unvalidated "
+            "— press Refresh live data in the sidebar to rank on real impressions."
+            if config.credentials_available() else
+            "No Google service-account file, so there are no performance figures. "
+            "Everything below is read from your coverage snapshot alone.")
     report.source = "live" if metrics else "coverage-only"
 
     # ── Your real queries (only when the keyword engine is on) ─────────────
     if live and use_keywords and kw.enabled():
-        step(0.4, "Reading the queries you already rank for…")
-        found = kw.gsc_keywords(site, start, end) if (start and end) else {
-            "ok": False, "keywords": [], "detail": "No date range selected."}
-        report.keywords = found["keywords"]
-        if not found["ok"]:
-            report.notes.append(found["detail"])
+        report.keywords = keywords or []
+        if not report.keywords:
+            report.notes.append(
+                "No Search Console queries loaded yet — press Refresh live data in the "
+                "sidebar to fill in the striking-distance section."
+                if config.credentials_available() else
+                "No Google service-account file, so there are no queries to rank on.")
     elif not kw.enabled():
         report.notes.append("The keyword engine is off, so this report has no "
                             "striking-distance section. Turn it on in Settings → "

@@ -127,15 +127,17 @@ def data_source_note(source: str) -> None:
 
 def stale_coverage_banner(source: str, creds: bool) -> None:
     """
-    A LOUD, in-content warning — not just the small badge above — for the one
-    state that used to be invisible: credentials are connected (so the
-    not-connected `connect_banner` below never fires), but this session
-    hasn't pressed "Refresh live data" yet, so every indexing verdict on
-    screen (Indexed / Not indexed / Couldn't check) is still read from the
-    old saved sample snapshot. That silent gap is exactly what let genuinely
-    indexed pages read "Not indexed" until someone thought to refresh by
-    hand. When there's no key file at all, `connect_banner` already carries
-    this message loudly, so this stays quiet then rather than repeating it.
+    A LOUD, in-content warning — not just the small badge above — for the
+    ordinary state a connected session starts every page in: credentials are
+    connected (so the not-connected `connect_banner` below never fires), but
+    nobody has pressed "Refresh live data" *this session* yet, so every
+    indexing verdict on screen (Indexed / Not indexed / Couldn't check) is
+    still read from the saved sample snapshot. This dashboard never calls
+    Google on its own — not on page load, not on a rerun — so this banner is
+    what tells you the numbers are still the sample until you press that one
+    button. When there's no key file at all, `connect_banner` already
+    carries this message loudly, so this stays quiet then rather than
+    repeating it.
     """
     if source != "seed" or not creds:
         return
@@ -147,22 +149,6 @@ def stale_coverage_banner(source: str, creds: bool) -> None:
         "**🔄 Refresh live data** in the sidebar before acting on anything here.",
         icon="⚠️",
     )
-
-
-def autoload_notice(result: dict | None) -> None:
-    """
-    The outcome of an automatic first-time-this-session coverage load (see
-    `ui.data.coverage_rows`), said once, right under the page header — so
-    connecting your data and opening a screen is enough; you don't have to
-    already know to press "Refresh live data" for the numbers to be trusted.
-    """
-    if not result:
-        return
-    if result["count"]:
-        st.success(f"🔄 {result['message']}", icon="🔄")
-    else:
-        st.error(f"🔄 Tried to load live coverage automatically, but it didn't work: "
-                 f"{result['message']}", icon="🔄")
 
 
 # ── Phase 8: the connection state, said out loud ───────────────────────────
