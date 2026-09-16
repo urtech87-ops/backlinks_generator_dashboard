@@ -48,7 +48,7 @@ def render(ctx) -> None:
 
     df, source = d.coverage_frame(site)
     c.stale_coverage_banner(source, ctx.creds)
-    c.data_source_note(source)
+    c.data_source_note(source, d.last_refreshed(site))
     st.caption("**Fix Plan** = what's broken and how to mend it · **Indexing** = how much "
                "of the site Google has accepted · **Performance** = what you earn in "
                "search · **Audience** = who actually turns up.")

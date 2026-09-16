@@ -138,7 +138,8 @@ def test_connected_screens_load_live_coverage_on_refresh(stub_live, page):
     at = _refresh(at)
     assert at.session_state["coverage_toolsvenue"] == LIVE_COVERAGE
     text = _text(at)
-    assert "Live data from Search Console" in text
+    # Phase 15: the badge now names when it was refreshed, not just "live".
+    assert "Live data (last refreshed" in text
     assert "Showing sample data" not in text
 
 

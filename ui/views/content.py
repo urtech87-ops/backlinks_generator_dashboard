@@ -26,6 +26,18 @@ RUN = "content_run"          # session state: the current topic → draft → im
 CHECK_LABEL = {"ok": "pass", "warn": "check", "bad": "fix this"}
 KEYWORD_BRIEF = "content_kw_brief"   # session state: the last keyword brief
 
+# Step 1's own plain snapshot of its fields (topic/keyword/notes/internal links).
+# Streamlit clears a widget's session_state entry once that widget stops being
+# instantiated on a run — which happens to every one of step 1's inputs the
+# moment the wizard moves to step 2, since only one step's function runs per
+# render. Reading "content_topic" etc. directly from later steps therefore saw
+# it vanish (back to "") as soon as any rerun happened on step 2 or later, which
+# is what made "Research & write" report no topic even though the box was full.
+# `_c_topic()` copies its widgets' values into this dict every time it renders
+# (which always happens at least once, on step 1, before Next can be pressed),
+# and every later step reads from here instead of the raw widget keys.
+FIELDS = "content_fields"
+
 
 SKILLS = [
     ("content-agent-orchestrator", "Runs the whole pipeline end to end for one topic."),
@@ -125,11 +137,13 @@ def _c_topic(ctx, coverage_df) -> None:
     _keyword_helper(ctx, topic)
 
     keyword = st.session_state.get("content_keyword", "")
+    notes = st.session_state.get("content_notes", "")
     options = agent.internal_link_options(coverage_df, site, topic, keyword)
+    default_internal = [o["url"] for o in options[:4]]
     if options:
         st.multiselect(
             "Pages this article should link to", options=[o["url"] for o in options],
-            default=[o["url"] for o in options[:4]],
+            default=default_internal,
             format_func=lambda u: next((o["page"] for o in options if o["url"] == u), u),
             key="content_internal",
             help="From the live sitemap, indexed pages only — ranked by relevance to "
@@ -139,6 +153,12 @@ def _c_topic(ctx, coverage_df) -> None:
     else:
         st.caption("No indexed pages to link to yet, so the article will link to your "
                    "homepage only. Clear the Fix Plan and they'll appear here.")
+
+    # The current, actual field values — read by every later step. See FIELDS above.
+    st.session_state[FIELDS] = {
+        "topic": topic, "keyword": keyword, "notes": notes,
+        "internal": st.session_state.get("content_internal", default_internal),
+    }
 
     st.write("")
     _, next_col, _ = st.columns([1, 1, 3])
@@ -228,9 +248,13 @@ def _suggested_topics(ctx) -> None:
 # ── Step 2: research + write ────────────────────────────────────────────────
 def _c_research_write(ctx) -> None:
     site = ctx.site
-    topic = st.session_state.get("content_topic", "")
-    keyword = st.session_state.get("content_keyword", "")
-    notes = st.session_state.get("content_notes", "")
+    # Read from step 1's persisted snapshot, not the raw widget keys — those
+    # get cleared by Streamlit as soon as step 1's inputs stop being rendered,
+    # which is every render of this step. See FIELDS above.
+    fields = st.session_state.get(FIELDS) or {}
+    topic = fields.get("topic", "")
+    keyword = fields.get("keyword", "")
+    notes = fields.get("notes", "")
 
     c.section("2 · Research it, then write it",
               f"Research runs through your search provider "
@@ -251,7 +275,7 @@ def _c_research_write(ctx) -> None:
     if st.button("🔎 Research and write the draft", type="primary", key="content_write"):
         coverage_df, _ = d.coverage_frame(site)
         options = agent.internal_link_options(coverage_df, site, topic, keyword)
-        picked = st.session_state.get("content_internal", [o["url"] for o in options[:4]])
+        picked = fields.get("internal", [o["url"] for o in options[:4]])
         internal = [o for o in options if o["url"] in picked]
         _run(site, topic, keyword, notes, internal)
 
