@@ -185,7 +185,8 @@ def test_refresh_button_loads_live_coverage(connected):
     at = _refresh(connected())
     rows = at.session_state["coverage_toolsvenue"]
     assert rows == LIVE_COVERAGE
-    assert "Live data from Search Console" in _text(at)
+    # Phase 15: the badge now names when it was refreshed, not just "live".
+    assert "Live data (last refreshed" in _text(at)
 
 
 def test_stale_sample_never_shown_when_connected_but_refresh_fails(monkeypatch):

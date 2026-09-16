@@ -60,7 +60,7 @@ def render(ctx) -> None:
         ("Not worth linking to yet", counts.get(PLUMBING, 0) + counts.get(CONTENT, 0),
          "Broken, or refused by Google on quality. A link to these is wasted effort."),
     ])
-    c.data_source_note(source)
+    c.data_source_note(source, d.last_refreshed(site))
     st.caption("**Lane A** publishes to accounts you own, automatically. **Lane B** "
                "drafts guest pitches that wait for you to send them. Both start by "
                "picking the page of yours the link should point at.")

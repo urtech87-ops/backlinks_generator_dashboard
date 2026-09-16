@@ -84,8 +84,11 @@ if st.sidebar.button("🔄 Refresh live data", disabled=not creds, width="stretc
     (st.sidebar.success if count else st.sidebar.error)(message)
 
 if d.has_live(site):
-    st.sidebar.caption("🟢 Showing live coverage for this site — the sample snapshot has "
-                       "been replaced.")
+    when = d.last_refreshed(site)
+    st.sidebar.caption(
+        "🟢 Showing live coverage for this site"
+        + (f" — last refreshed {when}." if when else " — the sample snapshot has been replaced.")
+    )
 elif creds:
     st.sidebar.caption("Still showing the sample snapshot. Press the button above to "
                        "replace it with what Google reports today.")

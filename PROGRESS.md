@@ -5,12 +5,12 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-16 · **Current phase:** Phase 14 done — **new articles now
-rank their internal links by relevance instead of sitemap order, and follow the site's
-own tool-page structure instead of a generic template**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, seven scoped additions —
-Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13 and Phase 14 below — on top of
-Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-16 · **Current phase:** Phase 15 done — **a real refresh now
+survives a browser tab reload, and the Content page's "Research & write" no longer
+loses a topic that's plainly sitting in the box**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, eight scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14 and Phase 15 below —
+on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
 data BEHIND that verdict honest too, by auto-loading live coverage the first time a
@@ -938,6 +938,90 @@ quality content; backlinks are the visible target, not the engine.
       *excluded* — it's a different, already-close story that belongs to
       Overview/Opportunities — and that a cached competitor-gap scan surfaces
       its real reason text unchanged.
+
+- [x] **Phase 15 — Two bug fixes: live data lost on reload, a filled-in
+      topic reported as empty** — both reported live, both small and scoped.
+
+      **Bug 1 · Sample data returned after a browser tab reload.**
+      Repro: press Refresh live data (real data shows), reload the tab ->
+      back to the sample snapshot. Cause: `ui/data.py` cached a refresh's
+      coverage, Search Console performance and GA4 only in
+      `st.session_state`, which a tab reload starts completely fresh —
+      losing a real refresh was never actually different from never having
+      refreshed at all, as far as the next page load was concerned.
+      **The fix:** every successful `refresh_live()` now also writes its
+      result to `data/live_cache/<site>.json`, alongside the timestamp it
+      was refreshed at. A new `_hydrate_from_disk(site)` runs once per
+      site per session, before `coverage_rows()` / `performance_cache()` /
+      `ga4_cache()` / `has_live()` / `has_live_performance()` /
+      `has_live_ga4()` read `session_state` — so a fresh session picks up
+      the last real refresh from disk before ever falling back to seed.
+      This reads a cache, never the network, so it doesn't reopen Phase
+      13's "call Google in exactly one place" rule. A new
+      `ui.data.last_refreshed(site)` reports when that was (from this
+      session or a disk-hydrated earlier one), and `data_source_note()`
+      now says **"🟢 Live data (last refreshed \<time\>)"** or **"🟡 SAMPLE
+      data — never refreshed"** instead of the old undated wording — shown
+      on Overview, Analysis, Backlinks and the sidebar alike. Sample only
+      shows for a site with no disk cache at all, i.e. one that has
+      genuinely never been refreshed, in this session or any earlier one —
+      exactly the rule asked for. `data/live_cache/` is git-ignored, the
+      same as the rest of `data/`'s generated state.
+      **Bug 2 · "Go back and enter a topic first" with a topic plainly
+      typed in.** Repro: type a topic on the Content page, click "Research
+      & write" -> told to go back and enter one. Cause, found by reading
+      Streamlit's own widget-state handling, not guessed: a widget's
+      `session_state` entry is cleared once that widget stops being
+      instantiated on a render — and step 1's `content_topic` text input
+      (along with `content_keyword`, `content_notes` and the internal-link
+      multiselect) is only ever rendered by `_c_topic()`, step 1's own
+      function. The moment the wizard moved to step 2, those keys were
+      living on borrowed time: they still read correctly on the very next
+      render (the entry hadn't been swept yet), which is exactly why typing
+      a topic and clicking "Research & write →" looked fine — but the
+      *following* rerun on step 2 (clicking "🔎 Research and write the
+      draft" itself is exactly such a rerun) found `content_topic` already
+      gone and read back `""`. **The fix:** `_c_topic()` now copies its
+      four field values into one plain, non-widget session key,
+      `content_fields`, every time it renders — which happens at least
+      once, on step 1, before Next can even be pressed. `_c_research_write()`
+      (step 2) and its "Research and write the draft" button both read from
+      `content_fields` instead of the raw widget keys, so the values it
+      acts on are whatever step 1 actually last showed, not whatever
+      Streamlit happened to still be holding onto.
+      *Note:* `tests/test_phase15_persistence_and_topic.py` (5 new tests)
+      proves both: a direct `ui.data` test refreshes a site, clears
+      `st.session_state` outright (the same isolation a tab reload gives
+      you), and confirms `coverage_rows()` / `coverage_frame()` still
+      return "live" with the refreshed rows and `last_refreshed()` still
+      answers — plus a matching AppTest pass through the actual Overview
+      page (refresh in one `AppTest` "tab", read it back from a brand new
+      one) and a companion test that a site with no disk cache at all still
+      correctly reads as sample after the same clear. For the topic bug: a
+      test reproduces the exact failure — type a topic, advance to step 2,
+      force a second rerun there (matching what pressing the write button
+      itself does) — and confirms the "go back" warning never appears and
+      the topic still reads correctly; a second test stubs the write
+      pipeline (`agents.content.research` / `page_facts` / `write`) end to
+      end and presses the actual "🔎 Research and write the draft" button
+      after that same extra rerun, confirming the run that lands in
+      `session_state["content_run"]` carries the real typed topic, not "".
+      A new `tests/conftest.py` gives every test its own throwaway
+      live-cache directory (an autouse fixture patching
+      `ui.data._CACHE_DIR` to `tmp_path`), so the new disk persistence
+      never writes into the repo's real `data/live_cache/` from a test run
+      or leaks a refresh from one test into another — two pre-existing
+      tests' banner-text assertions were updated for the new dated wording
+      (`"Live data from Search Console"` → `"Live data (last refreshed"`);
+      nothing else about their behaviour changed. `pytest -q` — 72/72 (67
+      before this phase, +5 new tests in the new file; the two wording
+      updates above touch existing tests, not new ones).
+      Not verified against a real browser tab reload or real Google
+      credentials — this environment still has neither — but the
+      reproduction is exact: `st.session_state.clear()` is precisely what a
+      fresh Streamlit session starts from, and the AppTest pass drives the
+      real `refresh_live()` → disk-write → fresh-session → disk-read path
+      end to end with no shortcuts.
 
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its

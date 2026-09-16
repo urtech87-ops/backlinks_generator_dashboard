@@ -4,6 +4,8 @@ __pycache__/
 *.pyc
 data/*.log
 data/*.json
+# Persisted live Search Console/GA4 cache (Phase 15) — your data, not the app's.
+data/live_cache/
 # Your backlink tracker is your data, not the app's.
 data/*.csv
 .streamlit/secrets.toml

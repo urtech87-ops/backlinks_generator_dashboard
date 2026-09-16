@@ -58,7 +58,7 @@ def render(ctx) -> None:
     report = _run_controls(ctx, coverage_df, coverage_source, report)
     st.divider()
 
-    _health(report, coverage_source)
+    _health(report, coverage_source, site)
     st.divider()
 
     _whats_ranking(ctx, report, coverage_source)
@@ -254,7 +254,7 @@ def _briefing(ctx, report) -> None:
 
 
 # ── 2 · Indexing health ────────────────────────────────────────────────────
-def _health(report, coverage_source: str) -> None:
+def _health(report, coverage_source: str, site: config.Site) -> None:
     c.section("2 · Indexing health",
               "Backlinks to a page Google hasn't indexed do nothing. This is the "
               "number that gates everything else on this page.")
@@ -285,7 +285,7 @@ def _health(report, coverage_source: str) -> None:
                                           "means indexing, not links, is your problem."),
     ])
     st.progress(h["healthy"] / h["total"])
-    c.data_source_note(coverage_source)
+    c.data_source_note(coverage_source, d.last_refreshed(site))
     unchecked = (h.get("counts") or {}).get(analysis.UNKNOWN, 0)
     if unchecked:
         st.warning(

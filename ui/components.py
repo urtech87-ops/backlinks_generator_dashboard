@@ -114,15 +114,31 @@ def nav_button(label: str, page: str, key: str = "", help: str = "",
               on_click=lambda: st.session_state.update(nav=page))
 
 
-def data_source_note(source: str) -> None:
+def _friendly_time(refreshed_at: str) -> str:
+    """'2026-09-16T14:03:05' -> '16 Sep 2026, 14:03'. Falls back to the raw
+    string if it doesn't parse, rather than hiding it."""
+    if not refreshed_at:
+        return ""
+    try:
+        import datetime as _dt
+        return _dt.datetime.fromisoformat(refreshed_at).strftime("%d %b %Y, %H:%M")
+    except ValueError:
+        return refreshed_at
+
+
+def data_source_note(source: str, refreshed_at: str = "") -> None:
     """
     One consistent line telling the user whether they're on live or sample data.
     Said the same way on every page, so "sample" never quietly reads as "live".
+    Live carries when it was last actually refreshed (this session or, via the
+    disk cache, an earlier one); sample says plainly it's never been refreshed.
     """
     if source == "live":
-        show_badge("ok", "🟢 Live data from Search Console")
+        when = _friendly_time(refreshed_at)
+        show_badge("ok", f"🟢 Live data (last refreshed {when})" if when
+                   else "🟢 Live data from Search Console")
     else:
-        show_badge("warn", "🟡 SAMPLE data — a saved 16 Aug snapshot, not live")
+        show_badge("warn", "🟡 SAMPLE data — never refreshed")
 
 
 def stale_coverage_banner(source: str, creds: bool) -> None:
@@ -130,23 +146,23 @@ def stale_coverage_banner(source: str, creds: bool) -> None:
     A LOUD, in-content warning — not just the small badge above — for the
     ordinary state a connected session starts every page in: credentials are
     connected (so the not-connected `connect_banner` below never fires), but
-    nobody has pressed "Refresh live data" *this session* yet, so every
-    indexing verdict on screen (Indexed / Not indexed / Couldn't check) is
-    still read from the saved sample snapshot. This dashboard never calls
-    Google on its own — not on page load, not on a rerun — so this banner is
-    what tells you the numbers are still the sample until you press that one
-    button. When there's no key file at all, `connect_banner` already
-    carries this message loudly, so this stays quiet then rather than
-    repeating it.
+    this site has never been refreshed at all — not this session, not a
+    previous one (no disk cache) — so every indexing verdict on screen
+    (Indexed / Not indexed / Couldn't check) is still read from the saved
+    sample snapshot. This dashboard never calls Google on its own — not on
+    page load, not on a rerun — so this banner is what tells you the numbers
+    are still the sample until you press that one button. When there's no
+    key file at all, `connect_banner` already carries this message loudly,
+    so this stays quiet then rather than repeating it.
     """
     if source != "seed" or not creds:
         return
     st.warning(
         "⚠️ **Showing sample data — press Refresh live data for real results.** "
-        "Search Console is connected, but this session hasn't loaded live "
-        "coverage yet, so every indexed / not-indexed verdict below is still "
-        "the old saved snapshot, not what Google says today. Press "
-        "**🔄 Refresh live data** in the sidebar before acting on anything here.",
+        "Search Console is connected, but this site has never been refreshed, "
+        "so every indexed / not-indexed verdict below is still the old saved "
+        "snapshot, not what Google says today. Press **🔄 Refresh live data** "
+        "in the sidebar before acting on anything here.",
         icon="⚠️",
     )
 
