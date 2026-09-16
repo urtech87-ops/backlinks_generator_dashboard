@@ -145,6 +145,7 @@ def _sites_tab(ctx=None) -> None:
                 f"{p}_HOMEPAGE": site.homepage,
                 f"{p}_WP_URL": config.wp_credentials(site)["url"],
                 f"{p}_WP_USERNAME": config.wp_credentials(site)["username"],
+                f"{p}_OUTPUT_FORMAT": config.output_format(site),
             }
             values = {}
             for field in schema.site_fields(p, site.label):

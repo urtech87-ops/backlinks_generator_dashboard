@@ -99,6 +99,7 @@ class Site:
     ga4_property_id: str = ""   # GA4 numeric property id, e.g. "480000000" (blank = no GA4 yet)
     sitemap_url: str = ""       # used to discover the URL list for inspection
     homepage: str = ""          # used for a couple of heuristics
+    output_format: str = ""     # "" = use the per-site default (see output_format() below)
 
 
 # Add or edit sites here. Everything else about them is editable in Settings.
@@ -136,6 +137,7 @@ def _build_sites() -> list[Site]:
             ga4_property_id=get(f"{p}_GA4_ID", ""),
             sitemap_url=get(f"{p}_SITEMAP", d["sitemap_url"]),
             homepage=get(f"{p}_HOMEPAGE", d["homepage"]),
+            output_format=get(f"{p}_OUTPUT_FORMAT", ""),
         ))
     return sites
 
@@ -152,6 +154,45 @@ def ga4_ready(site: Site) -> bool:
     connected to GA4, and the UI must not claim it is.
     """
     return bool(credentials_available() and site.ga4_property_id)
+
+
+# ── Output template (Phase 16) ──────────────────────────────────────────────
+# Neither real site takes markdown, and they don't take the *same* HTML either
+# — ToolsVenue's tool pages and ToolsHall's blog posts are structured
+# differently. `agents/output_templates.py` owns the actual rendering; this is
+# just which one applies to which site, so it lives alongside the rest of the
+# per-site config rather than inside the agent.
+FORMAT_MARKDOWN = "markdown"
+FORMAT_TOOLSVENUE = "toolsvenue_html"
+FORMAT_TOOLSHALL = "toolshall_html"
+
+OUTPUT_FORMATS = {
+    FORMAT_MARKDOWN: "Plain markdown",
+    FORMAT_TOOLSVENUE: "ToolsVenue HTML (tool-page style)",
+    FORMAT_TOOLSHALL: "ToolsHall HTML (blog-post style)",
+}
+
+# A site with no explicit `{PREFIX}_OUTPUT_FORMAT` saved falls back to this,
+# keyed by the site's `key`. A site nobody's specified a template for yet
+# (ToolAcademy, or a new one added later) falls back further, to markdown —
+# never guessed into one of the two real templates.
+DEFAULT_OUTPUT_FORMAT = {
+    "toolsvenue": FORMAT_TOOLSVENUE,
+    "toolshall": FORMAT_TOOLSHALL,
+}
+
+
+def output_format(site: Site) -> str:
+    """
+    Which template a NEW article renders in for this site. Resolution order:
+    the site's own saved setting, then the per-site default above, then plain
+    markdown. An unrecognised saved value (a typo'd .env edit) is treated the
+    same as unset, rather than crashing the writer on an unknown format.
+    """
+    explicit = (site.output_format or "").strip()
+    if explicit in OUTPUT_FORMATS:
+        return explicit
+    return DEFAULT_OUTPUT_FORMAT.get(site.key, FORMAT_MARKDOWN)
 
 
 def wp_credentials(site: Site) -> dict:
