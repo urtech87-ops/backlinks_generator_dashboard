@@ -47,7 +47,6 @@ def render(ctx) -> None:
     )
 
     coverage_df, coverage_source = d.coverage_frame(site)
-    c.autoload_notice(d.autoload_result(site))
     c.stale_coverage_banner(coverage_source, ctx.creds)
     # The run happens before anything is drawn, so a fresh report is what the
     # sections below show — not the previous one with a rerun's delay.
@@ -130,11 +129,17 @@ def _onboarding(ctx, report) -> None:
 
 # ── 1 · Run the analysis ───────────────────────────────────────────────────
 def _stored(ctx, coverage_source: str):
-    """The stored run for exactly this site, date range and data source."""
+    """
+    The stored run for exactly this site, date range and data source — and
+    the same "Refresh live data" sequence number it was built from, so a
+    fresh refresh always recomputes rather than replaying a memoized report
+    built from the cache as it stood before that click.
+    """
     stored = st.session_state.get(REPORT) or {}
     if (stored.get("site") == ctx.site.key
             and stored.get("range") == f"{ctx.start} → {ctx.end}"
-            and stored.get("coverage_source") == coverage_source):
+            and stored.get("coverage_source") == coverage_source
+            and stored.get("refresh_seq") == d.refresh_seq()):
         return stored["report"]
     return None
 
@@ -142,53 +147,52 @@ def _stored(ctx, coverage_source: str):
 def _remember(ctx, coverage_source: str, report) -> None:
     st.session_state[REPORT] = {
         "site": ctx.site.key, "range": f"{ctx.start} → {ctx.end}",
-        "coverage_source": coverage_source, "report": report,
+        "coverage_source": coverage_source, "refresh_seq": d.refresh_seq(),
+        "report": report,
     }
 
 
 def _report(ctx, coverage_df, coverage_source: str):
     """
-    The report on screen. A stored run wins. Otherwise: with credentials the
-    page fetches its own figures once and keeps them, so landing here already
-    shows what's ranking instead of an empty panel asking you to press a button;
-    without credentials it builds from coverage alone and makes no network call
-    at all.
+    The report on screen — built only from what's already cached. This page
+    never calls Google on its own: it reads whatever the sidebar's "Refresh
+    live data" button last loaded (`ui.data.performance_metrics` /
+    `ui.data.keywords`), or nothing at all before that's ever been pressed, in
+    which case the ordering is from coverage alone and says so.
     """
     stored = _stored(ctx, coverage_source)
     if stored is not None:
         return stored
 
-    if not ctx.creds:
-        return analysis.run(ctx.site, coverage_df, ctx.start, ctx.end, live=False,
-                            coverage_source=coverage_source)
-
-    with st.spinner("Reading Search Console for this date range…"):
-        report = analysis.run(ctx.site, coverage_df, ctx.start, ctx.end, live=True,
-                              coverage_source=coverage_source)
+    metrics = d.performance_metrics(ctx.site)
+    keywords = d.keywords(ctx.site)
+    report = analysis.run(ctx.site, coverage_df, ctx.start, ctx.end, live=bool(metrics),
+                          coverage_source=coverage_source, metrics=metrics,
+                          keywords=keywords)
     _remember(ctx, coverage_source, report)
     return report
 
 
 def _run_controls(ctx, coverage_df, coverage_source: str, report):
     c.section("1 · Your data",
-              "Reads your coverage, your Search Console performance and the queries "
-              "you already rank for, then sorts every page into what it needs. Nothing "
-              "is written or published by this button.")
+              "Sorts every page into what it needs, from your coverage and whatever "
+              "Search Console figures the sidebar's Refresh live data last loaded. "
+              "Nothing here calls Google or writes or publishes anything — that "
+              "sidebar button is the only thing in this dashboard that does.")
 
     cols = st.columns([2, 2, 3])
     with cols[0]:
-        if st.button("🔄 Re-run the analysis", type="primary", key="ov_run",
+        if st.button("🔄 Re-sort my pages", type="primary", key="ov_run",
                      width="stretch",
-                     help="Fetches your Search Console figures again for the sidebar's "
-                          "date range. Takes a few seconds. Without Google credentials "
-                          "it still runs — on your coverage snapshot, and it says so."):
-            bar = st.progress(0.0, text="Starting…")
+                     help="Rebuilds this list from your coverage and whatever's "
+                          "currently cached. Takes no time and calls no API — press "
+                          "Refresh live data in the sidebar first for current figures."):
+            metrics = d.performance_metrics(ctx.site)
+            keywords = d.keywords(ctx.site)
             fresh = analysis.run(
-                ctx.site, coverage_df, ctx.start, ctx.end, live=True,
-                coverage_source=coverage_source,
-                progress=lambda fraction, message: bar.progress(fraction, text=message),
+                ctx.site, coverage_df, ctx.start, ctx.end, live=bool(metrics),
+                coverage_source=coverage_source, metrics=metrics, keywords=keywords,
             )
-            bar.empty()
             _remember(ctx, coverage_source, fresh)
             st.session_state.pop(BRIEFING, None)
             report = fresh
@@ -338,8 +342,8 @@ def _winners(ctx, report, coverage_source: str) -> None:
             "Console performance to fill in.",
             steps=[
                 "Add your Google service-account file on the **Settings** page.",
-                "Press **Refresh live data** in the sidebar to load your pages.",
-                "Press **Re-run the analysis** above to rank them on real figures.",
+                "Press **Refresh live data** in the sidebar — it loads your pages and "
+                "ranks them on real figures in one go.",
             ],
             icon="🏆",
         )
@@ -596,8 +600,7 @@ def _system_status(ctx) -> None:
                 "Point it at your service-account JSON file.",
                 "Run **Test connections** — it checks each API separately and tells "
                 "you exactly which step failed.",
-                "Press **Refresh live data** in the sidebar, then **Re-run the "
-                "analysis** here.",
+                "Press **Refresh live data** in the sidebar.",
             ],
             icon="🟡",
         )

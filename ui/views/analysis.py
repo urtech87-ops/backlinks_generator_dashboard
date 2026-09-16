@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from agents import analysis as ag
-from core import config, ga4, gsc, seed
+from core import config, seed
 from core.classifier import (
     BUCKET_ORDER, PLUMBING, CONTENT, CRAWL_BUDGET, HEALTHY, OTHER, UNKNOWN,
 )
@@ -47,7 +47,6 @@ def render(ctx) -> None:
     )
 
     df, source = d.coverage_frame(site)
-    c.autoload_notice(d.autoload_result(site))
     c.stale_coverage_banner(source, ctx.creds)
     c.data_source_note(source)
     st.caption("**Fix Plan** = what's broken and how to mend it · **Indexing** = how much "
@@ -248,13 +247,30 @@ def _performance(ctx, coverage_df: pd.DataFrame, coverage_source: str = "live") 
         )
         return
 
-    pages = gsc.search_analytics(ctx.site.gsc_property, ctx.start, ctx.end, ["page"])
-    queries = gsc.search_analytics(ctx.site.gsc_property, ctx.start, ctx.end, ["query"])
+    if not d.has_live_performance(ctx.site):
+        c.empty_state(
+            "No performance figures loaded yet",
+            "This view shows which pages and queries actually earn clicks and "
+            "impressions. Nothing on this page calls Google on its own — press the "
+            "one button that does.",
+            steps=["Press **Refresh live data** in the sidebar."],
+            icon="📈",
+        )
+        return
+
+    pages = d.performance_pages(ctx.site)
+    queries = d.performance_queries(ctx.site)
+    perf_range = d.performance_range(ctx.site)
+    if perf_range and perf_range != f"{ctx.start} → {ctx.end}":
+        st.info(f"Showing performance for **{perf_range}** — the range loaded on the "
+                "last refresh. Change the sidebar's date range and press **Refresh "
+                "live data** again to see a different window.", icon="📅")
 
     if not pages and not queries:
-        st.warning("No performance rows came back for this date range. Either the site "
-                   "genuinely has no impressions yet, or the service account isn't on "
-                   "this Search Console property — run **Test connections** in Settings.")
+        st.warning("No performance rows came back on the last refresh. Either the site "
+                   "genuinely has no impressions for that range, or the service account "
+                   "isn't on this Search Console property — run **Test connections** in "
+                   "Settings.")
         return
 
     if pages:
@@ -402,11 +418,28 @@ def _audience(ctx) -> None:
         )
         return
 
-    s = ga4.summary(ctx.site.ga4_property_id, ctx.start, ctx.end)
+    cache = d.ga4_cache(ctx.site)
+    if not cache:
+        c.empty_state(
+            "No GA4 figures loaded yet",
+            "This view shows how many real people arrive, where from, and what they "
+            "land on. Nothing on this page calls Google on its own — press the one "
+            "button that does.",
+            steps=["Press **Refresh live data** in the sidebar."],
+            icon="👥",
+        )
+        return
+
+    if cache.get("range") != f"{ctx.start} → {ctx.end}":
+        st.info(f"Showing GA4 figures for **{cache['range']}** — the range loaded on "
+                "the last refresh. Change the sidebar's date range and press "
+                "**Refresh live data** again to see a different window.", icon="📅")
+
+    s = cache.get("summary")
     if not s:
-        st.warning("No GA4 rows came back. Check the property ID and that the "
-                   "service-account email has Viewer access — **Test connections** on "
-                   "the Settings page will tell you which.")
+        st.warning("No GA4 rows came back on the last refresh. Check the property ID "
+                   "and that the service-account email has Viewer access — **Test "
+                   "connections** on the Settings page will tell you which.")
         return
 
     c.metric_row([
@@ -423,7 +456,7 @@ def _audience(ctx) -> None:
     with left:
         c.section("Where the visits come from",
                   "“Organic search” is the one this dashboard is trying to grow.")
-        ch = ga4.channels(ctx.site.ga4_property_id, ctx.start, ctx.end)
+        ch = cache.get("channels")
         if ch:
             st.dataframe(pd.DataFrame(ch), width="stretch", hide_index=True)
         else:
@@ -431,7 +464,7 @@ def _audience(ctx) -> None:
     with right:
         c.section("Which countries they're in",
                   "Useful for deciding what a piece should assume about its reader.")
-        co = ga4.countries(ctx.site.ga4_property_id, ctx.start, ctx.end)
+        co = cache.get("countries")
         if co:
             st.dataframe(pd.DataFrame(co), width="stretch", hide_index=True)
         else:
@@ -440,7 +473,7 @@ def _audience(ctx) -> None:
     c.section("The pages people arrive on",
               "The first page a visitor sees. These are the ones worth keeping indexed "
               "and worth linking to.")
-    tp = ga4.top_pages(ctx.site.ga4_property_id, ctx.start, ctx.end)
+    tp = cache.get("top_pages")
     if tp:
         st.dataframe(pd.DataFrame(tp), width="stretch", hide_index=True)
     else:

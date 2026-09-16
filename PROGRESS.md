@@ -5,19 +5,21 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-15 · **Current phase:** Phase 11-fix-2 done — **a truthfulness
-bug: connected sessions silently showed the stale sample snapshot as if it were live**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, five scoped additions —
-Phase 9, 10, 11, Phase 11-fix and Phase 11-fix-2 below — on top of Phase 12's UX redesign.
-Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-16 · **Current phase:** Phase 13 done — **stopped every silent
+live API call, and the Content page now suggests real topics instead of a blank box**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, six scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2 and Phase 13 below — on top of Phase 12's UX
+redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
-data BEHIND that verdict honest too — a connected session that hadn't pressed Refresh yet
-no longer looks indistinguishable from a genuinely live one. Phase 12 is the layer a
-non-SEO person actually needs: building a backlink, running guest outreach and writing an
-article are step-by-step wizards with a "Step X of N" strip, one job per screen, and Next
-disabled until that step has actually produced something to carry forward. What's left is
-not building — it's running the thing against real keys; see **First real run** below.)
+data BEHIND that verdict honest too, by auto-loading live coverage the first time a
+connected session read it — which Phase 13 then reversed, because "the first time it's
+read" turned out to mean "every single rerun", and Streamlit reruns the whole script on
+every click. Phase 12 is the layer a non-SEO person actually needs: building a backlink,
+running guest outreach and writing an article are step-by-step wizards with a "Step X of N"
+strip, one job per screen, and Next disabled until that step has actually produced
+something to carry forward. What's left is not building — it's running the thing against
+real keys; see **First real run** below.)
 
 ---
 
@@ -787,6 +789,110 @@ quality content; backlinks are the visible target, not the engine.
       live property itself remains unverified from here, same limitation
       every phase before this one has noted.
 
+- [x] **Phase 13 — Stop auto-fetching live data; suggest topics from real
+      data on Content** — two scoped changes, not a new phase of build.
+
+      **1 · Stop auto-fetching live data.** Reported live: a data screen
+      could fetch live Search Console/GA4 on open, spending API quota with
+      no click involved. Reading the code turned up four separate places
+      this happened, not one — because Streamlit reruns the *whole script*
+      on any interaction anywhere on the page, "fetches on open" from
+      Phase 11-fix-2 actually meant "fetches on every rerun":
+      `ui.data._autoload_live_coverage()` (Phase 11-fix-2's own fix, now the
+      thing being undone), Overview's `_report()` calling
+      `analysis.run(..., live=True)` on first paint whenever credentials
+      existed, the Analysis page's Performance and Audience tabs calling
+      `gsc.search_analytics()` / `ga4.*()` directly and unconditionally on
+      every render of those tabs, and the Backlinks page calling
+      `bl.rank_targets()` with no cached metrics (so it fetched its own) on
+      every render of Lane A/B's target picker, plus `_target_keywords()`
+      calling `kw.for_page()` the same way whenever a target was selected.
+      **The fix: this dashboard now calls Google in exactly one place.**
+      `ui.data.refresh_live(site, start, end)` — wired to the sidebar's
+      "🔄 Refresh live data" button, which already existed for coverage — now
+      also fetches Search Console performance (`["page"]`, `["query"]` and
+      `["page","query"]` dimensions, covering every shape the app needs) and
+      GA4's four reports, and caches all of it for the session.
+      `ui.data` gained the readers every page now uses instead of fetching:
+      `performance_metrics()` / `performance_pages()` / `performance_queries()`
+      / `performance_page_queries()` / `ga4_cache()` / `keywords()` — the last
+      one turns the cached raw rows into `core.keywords.Keyword` objects with
+      no network call, via new optional `rows=` / `page_rows=` parameters on
+      `core.keywords.gsc_keywords()` / `page_map()` / `for_page()` (default
+      `None` still fetches live, which is what the Opportunities page's own
+      *explicit* "Load my Search Console queries" button and "Build the
+      brief" button intentionally keep doing — an explicit, one-off click is
+      not the silent problem this phase closes). `agents.analysis.run()` no
+      longer fetches anything itself — it takes `metrics=` / `keywords=` as
+      plain inputs, so the module that decides the ordering is now a pure
+      function of whatever was already loaded. `agents.backlink.rank_targets()`
+      was already able to take a pre-fetched `metrics=` dict; every UI call
+      site now always passes one (never `None`), so its own live-fetch branch
+      is unreachable from the app and stays only as a safety net for a future
+      caller that doesn't have a cache to pass. The old auto-load plumbing
+      (`_autoload_live_coverage`, `autoload_result`, `ui.components.autoload_notice`)
+      is deleted, not deprecated. `ui.data.refresh_seq()` is a small addition
+      that made the "figures update the moment you refresh, no second click"
+      behaviour still work: Overview memoizes its computed `Report`, and
+      without this the memo would keep replaying the report built from the
+      cache *before* your last refresh. Every screen that used to fetch
+      silently now either reads the cache and says so (`stale_coverage_banner`
+      already existed for coverage; Performance/Audience gained the same
+      "no figures loaded yet — press Refresh live data" empty state) or, for
+      the one narrow per-page keyword lookup on Backlinks, shows nothing
+      rather than fetching, with a one-line hint to refresh.
+      *Note:* `tests/test_phase13_live_data_gate.py` (9 new tests) proves
+      `gsc.search_analytics` is never called across two full reruns of any
+      of Overview/Analysis/Content/Backlinks with no button pressed, that one
+      press of Refresh live data populates the cache every later reader
+      shares, and that the cache — not a live re-fetch — is what the Content
+      suggestions and Analysis tabs read afterward. `tests/test_stale_data_banner.py`
+      and `tests/test_phase8_ux.py` had their Phase 11-fix-2 auto-load tests
+      rewritten to assert the opposite (no key on session_state until refresh,
+      the loud sample banner instead of a quiet fetch) rather than deleted, so
+      the original stale-verdict bug they guarded against is still covered —
+      just closed by the banner alone now, not by fetching. `pytest -q` —
+      67/67 (58 before this phase, +9 new). Not run against real Google
+      credentials — same limitation every phase before this one has noted —
+      but the *shape* of the fix (one call site, everything else reads a
+      cache) is exactly what makes quota spend predictable once real keys
+      are in.
+
+      **2 · Suggest article topics from real data.** Content's Step 1 ("What
+      should this article be about?") gained a "💡 Suggested topics, from
+      real data" expander, drawn before the Topic box so it reads as the
+      first thing on the step rather than an afterthought. Two sources, both
+      already-cached and already-scored:
+      · **Search Console queries you rank poorly on** — `core.keywords`'s
+        existing `DEEP` band (position > 20, real impressions), read via the
+        new `ui.data.keywords()` cache reader, each rendered as *"You get N
+        impressions for 'X' but rank at P — write this,"* with N and P
+        straight from the cached row.
+      · **Competitor content gaps** — reused, not reimplemented: if the
+        Opportunity Finder's own scan (`agents.opportunity.scan()`, kind
+        `GAP`) has already run this session, its top gap opportunities and
+        their real `reasons[0]` (e.g. "3 of 3 competitors cover this; you
+        have nothing") are pulled straight from `st.session_state[opp_scan]`
+        — no second scrape, and nothing runs a competitor read from the
+        Content page itself, which would have been its own silent-fetch
+        violation of change 1 above.
+      Picking a suggestion (`st.button("Use this", on_click=...)`) fills
+      `content_topic` / `content_keyword` the same way every other hand-off
+      in this app fills them (the same pattern the keyword-brief picker
+      already used) — typing a topic by hand still works exactly as before,
+      and nothing writes or researches anything until Step 2's own button is
+      pressed. With no live performance cached yet, the expander says so —
+      *"No suggestions yet — refresh live data to get suggestions"* — quoting
+      the sidebar button by name, and never shows a number it doesn't have.
+      *Note:* the same `tests/test_phase13_live_data_gate.py` proves the
+      empty state names Refresh live data and contains no invented figures,
+      that a real DEEP-band query appears with its exact cached impressions
+      and position after a refresh and that clicking "Use this" fills both
+      boxes, that a striking-distance (position 4-20) query is correctly
+      *excluded* — it's a different, already-close story that belongs to
+      Overview/Opportunities — and that a cached competitor-gap scan surfaces
+      its real reason text unchanged.
+
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its
 first real run: this environment has never had a Google key, an OpenRouter key or a
@@ -798,9 +904,10 @@ it needs the same `TS_*` values filled in before it shows anything but sample da
 
 **First real run (in this order):**
 - Connect Google: **Settings → Google APIs**, then **Test connections**, then **Refresh
-  live data** in the sidebar. Then **Overview → Run the analysis** — that's the front door
-  for everything below, and with Search Console live it ranks on real impressions and
-  grows a 🎯 striking-distance step it can't show on seed data.
+  live data** in the sidebar — that one button is the front door for everything below now
+  (Phase 13): it loads coverage, Search Console performance and GA4 in one go, and
+  Overview ranks on real impressions and grows a 🎯 striking-distance step immediately,
+  with no separate "run" step needed.
 - Write one real article: add an OpenRouter key + a Content model, type a topic, and
   press **Research and write the draft**. That's the only way to see the drafting prompt
   and the quality checks against a live model. If DuckDuckGo throttles the research step,
