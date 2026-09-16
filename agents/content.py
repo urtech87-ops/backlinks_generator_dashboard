@@ -38,6 +38,7 @@ from core.classifier import HEALTHY
 from publishers import wordpress
 from publishers.base import Article, PublishResult
 
+from . import output_templates as templates          # per-site HTML (Phase 16)
 from .backlink import _parse_json, page_facts        # reuse, don't re-solve
 
 OUTPUT_ROOT = config.ROOT / "outputs"
@@ -597,11 +598,17 @@ def run_folder(draft: Draft) -> Path:
 
 
 def save_run(site, draft: Draft, res: Research = None, image_files: list = None,
-             draft_url: str = "") -> Path:
+             draft_url: str = "", fmt: str = None) -> Path:
     """
     Write the run to `outputs/<slug>/` in the same layout the orchestrator skill
     uses, so the folder is auditable and the standalone `publish.py` can read it.
     Returns the folder.
+
+    The markdown source is always saved as `article.md`. When the site's
+    output format (or a one-off override) isn't plain markdown, the
+    paste-ready HTML is *also* saved, as `article.html` — so the folder still
+    has the raw text even when the site's own template is what actually gets
+    used.
     """
     folder = run_folder(draft)
     (folder / "content").mkdir(parents=True, exist_ok=True)
@@ -611,6 +618,11 @@ def save_run(site, draft: Draft, res: Research = None, image_files: list = None,
         f"# {draft.title}\n\n{draft.body_markdown}\n", encoding="utf-8")
     (folder / "content" / "meta.json").write_text(
         json.dumps(draft.meta, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    fmt = fmt or (config.output_format(site) if site else config.FORMAT_MARKDOWN)
+    if fmt != config.FORMAT_MARKDOWN:
+        (folder / "content" / "article.html").write_text(
+            render_output(draft, site, fmt), encoding="utf-8")
 
     if res:
         lines = [f"# Research — {res.topic}", "", res.detail, "", "## Sources found"]
@@ -631,6 +643,7 @@ def save_run(site, draft: Draft, res: Research = None, image_files: list = None,
         "sources": len(res.sources) if res else 0,
         "images": [{"path": i["path"], "brief": i["brief"]} for i in (image_files or [])],
         "wordpress_draft_url": draft_url,
+        "output_format": fmt,
     }, indent=2), encoding="utf-8")
     return folder
 
@@ -650,13 +663,31 @@ def recent_runs(limit: int = 8) -> list:
     return runs[:limit]
 
 
-# ── 6. Publish (always a draft) ────────────────────────────────────────────
-def to_article(draft: Draft, image_files: list = None) -> Article:
-    """The draft as the publishers' `Article`, pictures included."""
+# ── 6. Output format + publish (always a draft) ─────────────────────────────
+def render_output(draft: Draft, site, fmt: str = None) -> str:
+    """
+    The draft in the format its site's editor actually takes — paste-ready
+    HTML matching that site's own template, or plain markdown. `fmt` lets a
+    single run override the site's saved default (the Content page's review
+    step offers this); leave it out and `core.config.output_format(site)`
+    decides automatically from which site is selected.
+    """
+    fmt = fmt or config.output_format(site)
+    return templates.render(draft, fmt, homepage=getattr(site, "homepage", ""),
+                            site_label=getattr(site, "label", "the site"))
+
+
+def to_article(draft: Draft, site=None, image_files: list = None,
+               fmt: str = None) -> Article:
+    """The draft as the publishers' `Article`, pictures included, its body
+    rendered in this site's own output format."""
     pictures = [i for i in (image_files or []) if not i.get("brief")]
+    fmt = fmt or (config.output_format(site) if site else config.FORMAT_MARKDOWN)
+    rendered = render_output(draft, site, fmt) if site else draft.body_markdown
     return Article(
         title=draft.title,
         body_markdown=draft.body_markdown,
+        body_html=rendered if fmt != config.FORMAT_MARKDOWN else "",
         tags=draft.meta.get("tags") or [],
         summary=draft.meta.get("meta_description", ""),
         slug=draft.meta.get("slug", ""),
@@ -666,10 +697,13 @@ def to_article(draft: Draft, image_files: list = None) -> Article:
     )
 
 
-def publish_draft(site, draft: Draft, image_files: list = None) -> PublishResult:
+def publish_draft(site, draft: Draft, image_files: list = None,
+                  fmt: str = None) -> PublishResult:
     """
     Create the WordPress DRAFT through the existing publisher. Status is
     hard-coded to `draft` inside `publishers/wordpress.py` — there is no live
-    publish path here, by design.
+    publish path here, by design. The draft's content is this site's own
+    output format (ToolsVenue/ToolsHall HTML, or markdown), not always plain
+    markdown reformatted the same generic way.
     """
-    return wordpress.publish(to_article(draft, image_files), site)
+    return wordpress.publish(to_article(draft, site, image_files, fmt), site)

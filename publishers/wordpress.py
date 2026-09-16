@@ -135,7 +135,7 @@ def publish(article: Article, site=None, as_draft: bool = True) -> PublishResult
 
     payload = {
         "title": article.title,
-        "content": md_to_html(article.body_markdown),
+        "content": article.body_html or md_to_html(article.body_markdown),
         "status": "draft",              # ALWAYS draft — see the module docstring
         "excerpt": article.summary,
         "tags": _resolve_terms(api, headers, clean_tags(article.tags, limit=6), "tags"),

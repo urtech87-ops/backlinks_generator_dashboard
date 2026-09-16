@@ -17,6 +17,7 @@ import streamlit as st
 
 from agents import content as agent
 from agents import opportunity as opp
+from agents import output_templates as templates
 from core import config, images as image_api, keywords as kw, search
 from ui import components as c
 from ui import data as d
@@ -464,11 +465,49 @@ def _c_review(ctx) -> None:
                        "being quoted by AI engines — worth a rerun once research works.")
 
     st.write("")
+    _output_format_picker(site, run)
+
+    st.write("")
     back_col, next_col, _ = st.columns([1, 1, 3])
     with back_col:
         c.wizard_back(STEP_C, 3)
     with next_col:
         c.wizard_next(STEP_C, 3, len(CONTENT_STEPS), label="Images →")
+
+
+def _output_format_picker(site, run: dict) -> None:
+    """
+    Neither ToolsVenue nor ToolsHall takes markdown — each has its own real
+    page structure, and the site picked in the sidebar decides which one a
+    new article should come out in. This is the one place that choice can be
+    overridden for just this article; the saved default per site lives in
+    Settings -> Sites.
+
+    The choice is written into `run` (a plain dict key, not a widget key) so
+    step 5 still has it after this step's own selectbox has been swept from
+    `session_state` — the exact trap Phase 15 fixed for the topic box.
+    """
+    site_default = config.output_format(site)
+    options = list(templates.FORMATS)
+    current = run.get("output_format") or site_default
+
+    fmt = st.selectbox(
+        "Output format for this article", options=options,
+        index=options.index(current) if current in options else options.index(site_default),
+        format_func=lambda v: templates.FORMATS.get(v, v),
+        key="content_fmt_pick",
+        help=f"{site.label} defaults to “{templates.FORMATS[site_default]}”. Pick "
+             "Plain markdown any time you'd rather have raw text.",
+    )
+    run["output_format"] = fmt
+    st.session_state[RUN] = run
+
+    edited = _edited_draft(run)
+    rendered = agent.render_output(edited, site, fmt)
+    with st.expander("📋 Paste-ready output", expanded=False):
+        st.caption("Copy this straight into the site's editor. Edit the boxes above and "
+                   "reopen this to see the change reflected.")
+        st.code(rendered, language="markdown" if fmt == config.FORMAT_MARKDOWN else "html")
 
 
 # ── Step 4: images ───────────────────────────────────────────────────────────
@@ -537,8 +576,11 @@ def _c_publish(ctx) -> None:
 
 
 def _publish(site, run: dict, rows: list) -> None:
+    fmt = run.get("output_format") or config.output_format(site)
     c.section("5 · File it as a WordPress draft",
-              "Always a draft. Nothing on this page can publish a live post.")
+              f"Filing in **{templates.FORMATS.get(fmt, fmt)}** — change that on the "
+              "review step if this isn't right. Always a draft either way; nothing on "
+              "this page can publish a live post.")
 
     wp = config.wp_credentials(site)
     if not (wp["username"] and wp["app_password"]):
@@ -564,17 +606,19 @@ def _publish(site, run: dict, rows: list) -> None:
                       key="content_publish", disabled=not can_file):
         draft = _edited_draft(run)
         with st.spinner("Uploading images and creating the draft…"):
-            result = agent.publish_draft(site, draft, run.get("images"))
+            result = agent.publish_draft(site, draft, run.get("images"), fmt)
         run["result"] = result
-        run["folder"] = str(agent.save_run(site, draft, run["research"],
-                                           run.get("images"), result.url if result.ok else ""))
+        run["folder"] = str(agent.save_run(site, draft, run["research"], run.get("images"),
+                                           result.url if result.ok else "", fmt))
         st.session_state[RUN] = run
 
     if cols[1].button("💾 Save to outputs/ only", key="content_save",
-                      help="Writes article.md, meta.json, the research brief and the "
-                           "images to a folder you can reuse or publish by hand."):
+                      help="Writes article.md (and article.html, for a site with an HTML "
+                           "template), meta.json, the research brief and the images to a "
+                           "folder you can reuse or publish by hand."):
         draft = _edited_draft(run)
-        run["folder"] = str(agent.save_run(site, draft, run["research"], run.get("images")))
+        run["folder"] = str(agent.save_run(site, draft, run["research"], run.get("images"),
+                                           fmt=fmt))
         st.session_state[RUN] = run
         st.success(f"Saved to `{run['folder']}`.", icon="💾")
 

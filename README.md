@@ -172,6 +172,8 @@ core/               config (reads and writes .env), settings schema, gsc, ga4,
                     keywords (the optional keyword engine)
 agents/             analysis.py    the triage Overview conducts from
                     content.py     topic → research → article → WordPress draft
+                    output_templates.py  per-site output format: ToolsVenue/ToolsHall
+                                   HTML, or plain markdown
                     backlink.py    Lane A: rank targets, draft, publish
                     outreach.py    Lane B: prospect, score, pitch, guest article
                     opportunity.py competitor + coverage gap finder

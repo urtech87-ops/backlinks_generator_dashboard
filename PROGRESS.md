@@ -5,12 +5,13 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-16 · **Current phase:** Phase 15 done — **a real refresh now
-survives a browser tab reload, and the Content page's "Research & write" no longer
-loses a topic that's plainly sitting in the box**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, eight scoped additions —
-Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14 and Phase 15 below —
-on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-16 · **Current phase:** Phase 16 done — **generated articles
+now come out in the SELECTED site's own real format — ToolsVenue's tool-page HTML,
+ToolsHall's blog-post HTML, or plain markdown as an explicit fallback — instead of
+plain markdown regardless of site**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, nine scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14, Phase 15 and Phase 16
+below — on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
 data BEHIND that verdict honest too, by auto-loading live coverage the first time a
@@ -1023,6 +1024,105 @@ quality content; backlinks are the visible target, not the engine.
       real `refresh_live()` → disk-write → fresh-session → disk-read path
       end to end with no shortcuts.
 
+- [x] **Phase 16 — Per-site OUTPUT TEMPLATES: real HTML, not plain markdown**
+      — reported live: generated articles came out as plain markdown, but
+      neither site's editor takes markdown. ToolsVenue's tool pages and
+      ToolsHall's blog posts are each their own hand-styled, inline-styled
+      HTML, and they're structured differently from each other.
+      **`agents/output_templates.py`** is the new module that does the
+      repainting. It reads the same structured data `agents.content.write()`
+      already returns — the body's own `## ` sections, plus `draft.meta`'s
+      `faq` and `internal_links` — and never reparses or reinterprets what
+      the model wrote, only redraws it: `render_toolsvenue()` produces the
+      tool-page pattern (`<section>` blocks, a coloured-rule `<h2>`, an
+      HTML `<table>` when a section is a numbered how-to of 3+ steps, FAQ as
+      `<details>`, a related-tools `<aside>` sidebar, with a markdown-link
+      scrape of the "related" section as a fallback if the model skipped
+      the structured `internal_links` field); `render_toolshall()` produces
+      the blog-post pattern (intro paragraph, plain `## H2` sections, FAQ as
+      `<details>`, a related-tools list, and a closing CTA box that links to
+      the most relevant related page, or the homepage with none). `render()`
+      is the one entry point; `FORMAT_MARKDOWN` returns the draft's own
+      markdown completely unchanged — the explicit fallback the brief asked
+      for, always one pick away.
+      **`core/config.py` gained the per-site setting.** `Site.output_format`
+      (a new `{PREFIX}_OUTPUT_FORMAT` .env key, exactly the existing
+      per-site pattern) plus `output_format(site)`, which resolves it: the
+      site's own saved value, else a built-in per-`key` default
+      (`DEFAULT_OUTPUT_FORMAT` — ToolsVenue → its HTML, ToolsHall → its
+      HTML), else plain markdown for a site nobody's specified a template
+      for yet (ToolAcademy, today). An unrecognised saved value (a typo'd
+      manual .env edit) is treated the same as unset rather than crashing
+      the writer. Editable in **Settings → Sites** (`core/settings.py`'s
+      `site_fields()` gained the field, in the same hardcoded-options style
+      the keyword-engine on/off field already uses) alongside every other
+      per-site setting.
+      **Generating for a site now outputs in that site's format
+      automatically, per the brief.** `agents/content.py` gained
+      `render_output(draft, site, fmt=None)` (resolves the format and calls
+      the templates module) and both `to_article()` and `save_run()` now
+      take an optional `fmt`, defaulting to `config.output_format(site)`
+      when one isn't given — so nothing that already calls them with just a
+      site has to change. `publishers/base.py`'s `Article` gained an
+      optional `body_html` field ("" by default, so every existing caller —
+      Lane A/B posts, and a markdown-format Content run — is byte-for-byte
+      unaffected); `publishers/wordpress.py`'s `publish()` now posts
+      `article.body_html or md_to_html(article.body_markdown)`, so a
+      ToolsVenue/ToolsHall draft is filed to WordPress in its own real
+      template, not markdown run through the same generic converter every
+      other publisher uses.
+      **The Content page's review step (step 3) gained the picker.** A new
+      `_output_format_picker()` shows a selectbox defaulting to the site's
+      own format, and a collapsed "📋 Paste-ready output" expander with
+      `st.code(...)` (Streamlit's own copy button) showing exactly what
+      would be filed or pasted — live against whatever's currently in the
+      title/body/meta boxes above, via the same `_edited_draft()` step 4/5
+      already use. The choice is written into `run["output_format"]` (a
+      plain dict key, not the selectbox's own widget key) so it survives
+      into step 5 the same way Phase 15 made the typed topic survive past
+      step 1 — a widget's `session_state` entry is swept once it stops being
+      instantiated, and step 5 doesn't redraw this selectbox. Step 5's own
+      header now names the format it's about to file in, and both the
+      "Create the WordPress draft" and "Save to outputs/ only" buttons pass
+      it through to `publish_draft()` / `save_run()`. `save_run()` now also
+      writes `content/article.html` alongside the always-written
+      `content/article.md` whenever the resolved format isn't markdown, so
+      the `outputs/<slug>/` folder keeps the raw source AND the paste-ready
+      file; `run.json` records which format was used.
+      **Nothing here touches or auto-publishes a live page** — WordPress
+      publishing is still hard-coded to draft inside `publishers/wordpress.py`,
+      unchanged; this phase only changes what the draft's *content* looks
+      like.
+      *Note:* the two templates are a best-effort match to the tool-page /
+      blog-post patterns described, not a pixel-for-pixel copy of a real
+      ToolsVenue or ToolsHall page — no real sample HTML was pasted in for
+      this phase. `render_toolsvenue()` / `render_toolshall()` in
+      `agents/output_templates.py` are the one place to tighten the markup
+      if/when a real page's HTML is pasted in for comparison.
+      `tests/test_phase16_output_templates.py` (16 new tests, no network or
+      model call): both sites' defaults resolve correctly and an explicit
+      save (or an unrecognised one) is handled correctly; ToolsVenue's HTML
+      has the `<section>`/`<table>`/`<details>`/`<aside>` pieces, including
+      the markdown-link-scrape fallback and skipping empty FAQ/related
+      blocks entirely rather than rendering them hollow; ToolsHall's HTML
+      has its `<h2>` sections, FAQ, related list and CTA box, including the
+      CTA falling back to the homepage with no related pages; the markdown
+      format returns the draft completely unchanged; `to_article()` only
+      sets `body_html` for an HTML format (a markdown-format site, and a
+      call with no site at all, both get `""`, unchanged from before this
+      phase); `save_run()` writes `article.html` only for an HTML format,
+      and an explicit `fmt=` overrides the site default; and two Streamlit
+      `AppTest` passes drive the real Content wizard — the picker defaults
+      to ToolsVenue's format with a real HTML preview rendered, and
+      switching to Plain markdown on step 3 survives, unchanged, all the
+      way to step 5's own header. `pytest -q` — 88/88 (72 before this
+      phase, +16 new). Not run against a real WordPress account or a real
+      model reply — this environment still has neither, the same
+      limitation every phase before this one has noted — so the actual
+      posted draft's HTML has been verified by direct inspection of
+      `render_toolsvenue()` / `render_toolshall()`'s output against a
+      realistic six-section article, not against a live WordPress post.
+
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its
 first real run: this environment has never had a Google key, an OpenRouter key or a
@@ -1066,6 +1166,10 @@ and its three buttons are built from. Run `pytest -q` before and after touching 
 `tests/test_phase8_ux.py` drives the whole journey through Streamlit's AppTest.
 
 ## Still needed from the user (pluggable, safe to defer)
+- Real sample HTML from a live ToolsVenue tool page and a live ToolsHall blog
+  post, if the Phase 16 templates should match byte-for-byte rather than
+  best-effort — paste them in and `agents/output_templates.py`'s
+  `render_toolsvenue()` / `render_toolshall()` are the one place to tighten.
 - Run **Settings → Test connections** with the real service-account file, so live GSC
   and GA4 are confirmed against the actual properties.
 - Image API name (currently dummy → writes image briefs).

@@ -40,6 +40,12 @@ class Article:
     categories: list = field(default_factory=list)
     images: list = field(default_factory=list)   # [{path, alt, featured}]
 
+    # Phase 16: pre-rendered, paste-ready HTML (a site's own template) that a
+    # publisher should post as-is instead of converting `body_markdown` with
+    # the generic `md_to_html()` below. "" (the default) keeps every existing
+    # caller — Lane A/B posts, and markdown-format Content runs — unchanged.
+    body_html: str = ""
+
 
 @dataclass
 class PublishResult:

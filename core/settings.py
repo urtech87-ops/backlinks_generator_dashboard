@@ -61,6 +61,14 @@ def site_fields(prefix: str, label: str) -> list[Field]:
               "Comma-separated domains the Opportunity Finder compares you against. "
               "Leave blank and it finds them by searching your niche instead.",
               placeholder="example.com, another-site.com"),
+        Field(f"{prefix}_OUTPUT_FORMAT", "Article output format",
+              "How a new article for this site comes out: paste-ready HTML matching "
+              "the site's own template, or plain markdown. Can also be switched for "
+              "one article at a time on the Content page's review step.",
+              kind="select", options=("toolsvenue_html", "toolshall_html", "markdown"),
+              option_labels={"toolsvenue_html": "ToolsVenue HTML (tool-page style)",
+                             "toolshall_html": "ToolsHall HTML (blog-post style)",
+                             "markdown": "Plain markdown"}),
     ]
 
 
