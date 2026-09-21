@@ -558,6 +558,11 @@ def _to_content(rec) -> None:
         "content_keyword": rec.keyword,
         "content_notes": rec.notes,
         "content_source": f"the Overview — {rec.kind.lower()}",
+        # Strengthen/rewrite recommendations are about one specific page —
+        # scope the Content page's suggestions and keyword picker to it, the
+        # same as the winners table's own "Write article" button below. A
+        # brand-new-article recommendation has no url, so it stays site-wide.
+        "content_focus_url": rec.url,
         "nav": "Content",
     })
 
@@ -566,12 +571,17 @@ def _to_content_page(stat) -> None:
     """
     The winners table's writer hand-off. Same keys as every other hand-off, so
     the Content page doesn't care which screen sent the work over.
+    `content_focus_url` scopes the Content page's "Suggested topics" and
+    keyword picker to THIS page's own Search Console data, instead of the
+    site-wide default — a page's own striking-distance queries are a better
+    steer than what happens to be deep everywhere else on the site.
     """
     st.session_state.update({
         "content_topic": stat.topic,
         "content_keyword": stat.keyword,
         "content_notes": stat.write_note,
         "content_source": f"the Overview — {stat.page or stat.url}",
+        "content_focus_url": stat.url,
         "nav": "Content",
     })
 

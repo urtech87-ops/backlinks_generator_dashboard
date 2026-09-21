@@ -29,6 +29,14 @@ RUN = "content_run"          # session state: the current topic → draft → im
 CHECK_LABEL = {"ok": "pass", "warn": "check", "bad": "fix this"}
 KEYWORD_BRIEF = "content_kw_brief"   # session state: the last keyword brief
 
+# Phase 18: the page this article was launched from, e.g. via the Overview's
+# "Write article" button. A plain (non-widget) key, so — unlike content_topic
+# et al — it survives past step 1 without needing the FIELDS snapshot below.
+# Set from the transient "content_focus_url" hand-off key on step 1's first
+# render after arriving, then kept until cleared (see "Show site-wide
+# instead") or overwritten by the next hand-off.
+FOCUS = "content_focus_page"
+
 # Step 1's own plain snapshot of its fields (topic/keyword/notes/internal links).
 # Streamlit clears a widget's session_state entry once that widget stops being
 # instantiated on a run — which happens to every one of step 1's inputs the
@@ -114,7 +122,22 @@ def _c_topic(ctx, coverage_df) -> None:
         st.success(f"Filled in from {handed_over}. Edit anything below before you run it.",
                    icon="💡")
 
-    _suggested_topics(ctx)
+    # The one-time hand-off from Overview: pop it into the persistent FOCUS
+    # key so it survives reruns the way content_source deliberately doesn't.
+    incoming_focus = st.session_state.pop("content_focus_url", "")
+    if incoming_focus:
+        st.session_state[FOCUS] = incoming_focus
+    focus_url = st.session_state.get(FOCUS, "")
+
+    if focus_url:
+        f_info, f_clear = st.columns([5, 1])
+        f_info.caption(f"🎯 Scoped to **{focus_url}** — suggested topics and the keyword "
+                       "picker below only show this page's own Search Console data.")
+        if f_clear.button("Show site-wide instead", key="content_focus_clear"):
+            st.session_state.pop(FOCUS, None)
+            st.rerun()
+
+    _suggested_topics(ctx, focus_url)
 
     topic = st.text_input(
         "Topic", key="content_topic",
@@ -137,7 +160,7 @@ def _c_topic(ctx, coverage_df) -> None:
         help="Free text passed to the model — an angle, an audience, a use-case.",
     )
 
-    _keyword_helper(ctx, topic)
+    _keyword_helper(ctx, topic, focus_url)
 
     keyword = st.session_state.get("content_keyword", "")
     notes = st.session_state.get("content_notes", "")
@@ -171,9 +194,14 @@ def _c_topic(ctx, coverage_df) -> None:
                       label="Research & write →")
 
 
-def _suggested_topics(ctx) -> None:
+def _has_scan(ctx) -> bool:
+    scanned = st.session_state.get(opp_ui.SCAN) or {}
+    return scanned.get("site") == ctx.site.key and bool(scanned.get("result"))
+
+
+def _site_topic_suggestions(ctx) -> list:
     """
-    Real suggestions instead of a blank box, from two sources:
+    Site-wide suggestions, from two sources:
 
       · Search Console queries this site gets impressions for but ranks
         poorly on (position 20+) — `core.keywords`' DEEP band, read from
@@ -182,10 +210,6 @@ def _suggested_topics(ctx) -> None:
       · Competitor content gaps, reused from the Opportunity Finder's own
         scan logic — pulled from this session's last scan if one has been
         run, never re-scraped from here.
-
-    Picking one fills the topic (and keyword) box below; typing your own
-    still works exactly as before. Nothing here writes or researches
-    anything by itself — it only suggests.
     """
     site = ctx.site
     suggestions = []
@@ -199,11 +223,9 @@ def _suggested_topics(ctx) -> None:
                       f"but rank at position {k.position} — write this.",
         })
 
-    scanned = st.session_state.get(opp_ui.SCAN) or {}
-    has_scan = scanned.get("site") == site.key and bool(scanned.get("result"))
-    if has_scan:
-        gaps = sorted((o for o in scanned["result"].opportunities if o.kind == opp.GAP),
-                     key=lambda o: -o.score)
+    if _has_scan(ctx):
+        gaps = sorted((o for o in st.session_state[opp_ui.SCAN]["result"].opportunities
+                       if o.kind == opp.GAP), key=lambda o: -o.score)
         for o in gaps[:5]:
             suggestions.append({
                 "topic": o.topic, "keyword": o.keyword, "source": "🕳️ Competitor gap",
@@ -211,8 +233,86 @@ def _suggested_topics(ctx) -> None:
                           "Competitors cover this and you don't.",
             })
 
-    with st.expander("💡 Suggested topics, from real data", expanded=bool(suggestions)):
+    return suggestions
+
+
+def _page_topic_suggestions(ctx, focus_url: str) -> list:
+    """
+    Suggestions scoped to ONE page (Phase 18) — used when this article was
+    launched from that page's "Write article" button, so a topic suggested
+    here has to be about that page, not whatever else is deep site-wide.
+
+    Source order:
+      1. That page's own Search Console queries (`core.keywords.for_page`),
+         striking-distance ones first — they're the closest real wins.
+      2. If Search Console has no rows for this exact page yet, the site's
+         queries that share words with the page's own URL slug — still real
+         GSC demand, just matched by URL instead of by page dimension.
+    No competitor gaps here: those are site-wide by construction and would
+    be exactly the "other pages' topics" this scoping exists to keep out.
+    """
+    if not focus_url:
+        return []
+    site = ctx.site
+    suggestions = []
+
+    page_kws = kw.for_page(site, focus_url, ctx.start, ctx.end,
+                           rows=d.performance_page_queries(site))
+    ordered = [k for k in page_kws if k.band == kw.STRIKING] + \
+              [k for k in page_kws if k.band != kw.STRIKING]
+    for k in ordered[:6]:
+        recommended = k.band == kw.STRIKING
+        suggestions.append({
+            "topic": k.keyword, "keyword": k.keyword,
+            "source": ("⭐ Recommended — real demand, close to ranking" if recommended
+                      else "🔍 This page's Search Console queries"),
+            "reason": k.reason,
+        })
+
+    if not suggestions:
+        slug_topic = opp.topic_from_url(focus_url)
+        if slug_topic:
+            matches = sorted((k for k in d.keywords(site)
+                              if kw.overlap(slug_topic, k.keyword) >= 0.2),
+                             key=lambda k: -k.score)
+            for k in matches[:6]:
+                suggestions.append({
+                    "topic": k.keyword, "keyword": k.keyword,
+                    "source": "🔍 Matches this page's URL",
+                    "reason": k.reason,
+                })
+
+    return suggestions
+
+
+def _suggested_topics(ctx, focus_url: str = "") -> None:
+    """
+    Real suggestions instead of a blank box. Site-wide by default; scoped to
+    one page when `focus_url` is set (arrived via a page's "Write article"
+    button — see `_page_topic_suggestions`). Picking one fills the topic (and
+    keyword) box below; typing your own still works exactly as before.
+    Nothing here writes or researches anything by itself — it only suggests.
+    """
+    site = ctx.site
+    suggestions = (_page_topic_suggestions(ctx, focus_url) if focus_url
+                  else _site_topic_suggestions(ctx))
+
+    label = ("💡 Suggested topics, from real data — for this page" if focus_url
+             else "💡 Suggested topics, from real data")
+    with st.expander(label, expanded=bool(suggestions)):
         if not suggestions:
+            if focus_url:
+                if not kw.enabled():
+                    st.caption("The keyword engine is off, so there's nothing to suggest "
+                               "for this page. Turn it on in Settings → Content tools.")
+                elif not d.has_live_performance(site):
+                    st.caption("No suggestions yet for this page. Press **Refresh live "
+                               "data** in the sidebar to pull its Search Console queries.")
+                else:
+                    st.caption("No Search Console queries or URL-matched terms for this "
+                               "page yet. Nice problem to have — write your own topic "
+                               "below.")
+                return
             if not kw.enabled():
                 st.caption("The keyword engine is off, so there's nothing to suggest "
                            "from Search Console yet. Turn it on in Settings → Content "
@@ -243,7 +343,7 @@ def _suggested_topics(ctx) -> None:
                               "content_topic": s["topic"],
                               "content_keyword": s.get("keyword", ""),
                           }))
-        if not has_scan:
+        if not focus_url and not _has_scan(ctx):
             c.nav_button("Find competitor gaps too", "Opportunities",
                          key="content_suggest_opp2")
 
@@ -304,16 +404,40 @@ def _c_research_write(ctx) -> None:
                       label="Review & edit →")
 
 
-def _keyword_helper(ctx, topic: str) -> None:
+def _keyword_row(candidate, key: str) -> None:
+    """One keyword candidate: its band/validated badge, and a button that
+    puts it in the primary keyword box. Shared by the site-wide brief and
+    the page-scoped picker below."""
+    cols = st.columns([4, 2, 1])
+    label = "unvalidated" if candidate.unvalidated else candidate.band
+    cols[0].markdown(f"**{candidate.keyword}**")
+    cols[0].caption(candidate.reason)
+    with cols[1]:
+        c.show_badge("warn" if candidate.unvalidated else "ok", label)
+    cols[2].button("Use", key=key,
+                   on_click=lambda k=candidate.keyword:
+                       st.session_state.update({"content_keyword": k}),
+                   help="Puts this in the primary keyword box above.")
+
+
+def _keyword_helper(ctx, topic: str, focus_url: str = "") -> None:
     """
     The keyword engine (Phase 6) feeding the writer: real Search Console terms
     first, free autocomplete second. Optional — switched off, this is one line
     saying so, and the writer picks its own phrase as it always did.
+
+    Scoped to one page (Phase 18) when `focus_url` is set — see
+    `_keyword_helper_for_page`. Site-wide behavior below is unchanged for a
+    topic entered without a page hand-off.
     """
     if not kw.enabled():
         st.caption("The keyword engine is switched off, so the writer will choose the "
                    "phrase itself. Turn it on in Settings → Content tools to target a "
                    "keyword you already get impressions for.")
+        return
+
+    if focus_url:
+        _keyword_helper_for_page(ctx, focus_url)
         return
 
     with st.expander("🔑 Pick the keyword from real data instead of guessing"):
@@ -342,20 +466,48 @@ def _keyword_helper(ctx, topic: str) -> None:
             st.caption(brief.notes)
 
         for i, candidate in enumerate(brief.cluster[:8]):
-            cols = st.columns([4, 2, 1])
-            label = "unvalidated" if candidate.unvalidated else candidate.band
-            cols[0].markdown(f"**{candidate.keyword}**")
-            cols[0].caption(candidate.reason)
-            with cols[1]:
-                c.show_badge("warn" if candidate.unvalidated else "ok", label)
-            cols[2].button("Use", key=f"content_kw_use_{i}",
-                           on_click=lambda k=candidate.keyword:
-                               st.session_state.update({"content_keyword": k}),
-                           help="Puts this in the primary keyword box above.")
+            _keyword_row(candidate, f"content_kw_use_{i}")
 
         if brief.questions:
             st.caption("Questions worth answering in the FAQ: "
                        + " · ".join(brief.questions[:6]))
+
+
+def _keyword_helper_for_page(ctx, focus_url: str) -> None:
+    """
+    Page-scoped keyword picker (Phase 18). This page's own Search Console
+    queries only — not the whole site's — with its striking-distance queries
+    (real impressions, position 5-20) called out as **recommended**. There's
+    no paid keyword API here (CLAUDE.md: never fabricate a search volume), so
+    "recommended" means real GSC demand close to ranking, and nothing else.
+    """
+    site = ctx.site
+    with st.expander("🔑 Pick the keyword from real data for this page", expanded=True):
+        st.caption(kw.status())
+        page_kws = kw.for_page(site, focus_url, ctx.start, ctx.end,
+                               rows=d.performance_page_queries(site))
+        if not page_kws:
+            st.caption(f"No Search Console queries for `{focus_url}` in this date range "
+                       "yet. Press **Refresh live data** in the sidebar, or widen the "
+                       "date range — this list only ever shows this page's own queries, "
+                       "never another page's.")
+            return
+
+        recommended = [k for k in page_kws if k.band == kw.STRIKING]
+        rest = [k for k in page_kws if k.band != kw.STRIKING]
+
+        if recommended:
+            st.markdown("**⭐ Recommended — real demand, close to ranking**")
+            st.caption("Striking distance: this page already earns impressions for these "
+                       "and sits at position 5-20 — page one is realistically reachable.")
+            for i, candidate in enumerate(recommended):
+                _keyword_row(candidate, f"content_kw_page_rec_{i}")
+            st.write("")
+
+        if rest:
+            st.markdown("**This page's other Search Console queries**")
+            for i, candidate in enumerate(rest[:10]):
+                _keyword_row(candidate, f"content_kw_page_rest_{i}")
 
 
 def _run(site, topic: str, keyword: str, notes: str, internal: list) -> None:

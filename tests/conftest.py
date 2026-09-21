@@ -10,6 +10,11 @@ process, an earlier test's write would leak into a later test that expects
 a site to look "never refreshed". Every test gets its own throwaway
 directory instead, so this cache never crosses a test boundary or touches
 the real repo.
+
+Phase 18 added a second small persisted file, `data/ui_state.json` (the
+sidebar's selected site) — every test that runs the app through
+`AppTest.from_file(app.py)` exercises the sidebar and would otherwise write
+to that real path too, so it gets the same throwaway treatment here.
 """
 
 import sys
@@ -26,3 +31,4 @@ from ui import data as d  # noqa: E402
 @pytest.fixture(autouse=True)
 def _isolated_live_cache_dir(monkeypatch, tmp_path):
     monkeypatch.setattr(d, "_CACHE_DIR", tmp_path / "live_cache")
+    monkeypatch.setattr(d, "_UI_STATE_PATH", tmp_path / "ui_state.json")

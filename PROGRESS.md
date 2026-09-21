@@ -5,12 +5,12 @@
 > history. Claude Code: after finishing a phase, update the checklist, the "Done /
 > Next up" lines, and the timestamp below.
 
-**Last updated:** 2026-09-16 · **Current phase:** Phase 17 done — **saved items
-(manual, never lost between sessions) and before/after impact tracking, on a new
-"Saved & Impact" page**
-**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, ten scoped additions —
-Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14, Phase 15, Phase 16
-and Phase 17 below — on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
+**Last updated:** 2026-09-21 · **Current phase:** Phase 18 done — **"Write article"
+now scopes Content's suggestions + keyword picker to the page that was clicked, and
+the sidebar's selected site survives a browser reload**
+**Overall:** ▓▓▓▓▓▓▓▓▓▓ 100% (all nine roadmap phases shipped, eleven scoped additions —
+Phase 9, 10, 11, Phase 11-fix, Phase 11-fix-2, Phase 13, Phase 14, Phase 15, Phase 16,
+Phase 17 and Phase 18 below — on top of Phase 12's UX redesign. Phase 7 made Overview the conductor; Phase 8 made it the *spine*; Phase 11 put a
 plain-English verdict on every ranked page; Phase 11-fix made that verdict honest when the
 underlying check is missing or fails, instead of silently lying; Phase 11-fix-2 made the
 data BEHIND that verdict honest too, by auto-loading live coverage the first time a
@@ -1201,6 +1201,58 @@ quality content; backlinks are the visible target, not the engine.
       against a real Google/OpenRouter credential from here — same
       limitation every phase before this one has noted.
 
+- [x] **Phase 18 — Two reported bugs: page-scoped Content suggestions, and the
+      sidebar's site surviving a reload** — both scoped fixes, no new pages.
+      **Bug 1 — "Write article" was scoping the writer's notes to the clicked
+      page but not its two real-data sections.** `ui/views/overview.py`'s two
+      hand-offs (`_to_content_page`, and `_to_content` for STRENGTHEN/REWRITE
+      recommendations) now also set `content_focus_url`. `ui/views/content.py`
+      pops that transient key into a persistent `content_focus_page` on step
+      1's first render (the same "persist past the widget sweep" trick
+      `content_fields` already used), and threads it through:
+      **"Suggested topics, from real data"** now calls a new
+      `_page_topic_suggestions()` — that page's own Search Console queries
+      via `core.keywords.for_page()`, striking-distance ones first, falling
+      back to site queries that share words with the page's URL slug when
+      Search Console has no page-level rows yet; competitor gaps (site-wide
+      by construction) are left out entirely when a page is in focus.
+      **"Pick the keyword from real data"** now calls a new
+      `_keyword_helper_for_page()` in place of the generic `kw.brief()` flow —
+      the page's own queries, with its striking-distance ones (real
+      impressions, position 5-20) under an explicit "⭐ Recommended — real
+      demand, close to ranking" heading. Nothing invented anywhere: there is
+      still no paid keyword API, so "recommended" means real GSC demand
+      close to ranking and nothing else. Landing on Content directly (no
+      hand-off) is untouched — same site-wide suggestions as before. A
+      "Show site-wide instead" link clears the focus by hand.
+      **Bug 2 — the sidebar's site selector had no `key=`,** so `st.selectbox`
+      had nothing to remember between reruns and always fell back to its
+      first option — `config.SITES[0]` — including on a browser tab reload,
+      which starts a brand-new Streamlit session. `ui/data.py` gained
+      `save_selected_site()` / `last_selected_site()`, writing to
+      `data/ui_state.json` on every change (skipped if unchanged) — the same
+      "session_state alone isn't enough, it's wiped by a reload" pattern
+      Phase 15 built for live data, just for one string instead of a whole
+      cache. `app.py` now seeds `st.session_state["site_key"]` from that file
+      before the selectbox is drawn (falling back to the first site if the
+      saved key no longer exists, e.g. a site removed from `.env`), keys the
+      widget on it, and persists on every rerun.
+      *Note:* `tests/test_phase18_page_scope_and_site_persistence.py` (5 new
+      tests, via Streamlit's AppTest): clicking "Write article" on either of
+      two indexed pages with distinct striking-distance queries lands on
+      Content showing **only** that page's own query as a suggestion and as
+      a recommended keyword, labelled "Recommended", with the other page's
+      query never appearing; navigating to Content directly keeps the old
+      site-wide behavior (neither page's URL is claimed as a scope); picking
+      ToolsHall in the sidebar and then opening a brand-new `AppTest`
+      session (no shared `session_state`, the same isolation a real reload
+      gives you) still shows ToolsHall, not the default ToolsVenue; a fresh
+      install with nothing saved still defaults to the first site; and an
+      empty/blank save is ignored rather than clearing what was saved.
+      `pytest -q` — 106/106 (101 before this phase, +5 new). Not run against
+      a real Google/OpenRouter credential from here — same limitation every
+      phase before this one has noted.
+
 ## Next up (start here)
 **The build is done — every phase through 9 is ticked.** What the project needs now is its
 first real run: this environment has never had a Google key, an OpenRouter key or a
@@ -1240,8 +1292,15 @@ Fix Plan, and `nav` to change page. `agents/analysis.py` is what decides *which*
 page gets, and `ui/components.py` is what every page draws with. Phase 8 added two more
 hand-off facts worth knowing: `settings_section` deep-links into one Settings section, and
 `agents/analysis.ranked_pages()` produces the `PageStat` rows the Overview's winners table
-and its three buttons are built from. Run `pytest -q` before and after touching any of it —
-`tests/test_phase8_ux.py` drives the whole journey through Streamlit's AppTest.
+and its three buttons are built from. Phase 18 added `content_focus_url` (transient, from
+Overview) / `content_focus_page` (its persistent copy on the Content page) — when set, the
+"Suggested topics" and keyword-picker sections scope to that one page instead of the whole
+site; see `ui/views/content.py`'s `_page_topic_suggestions()` and
+`_keyword_helper_for_page()`. Also Phase 18: the sidebar's selected site now persists to
+`data/ui_state.json` via `ui.data.save_selected_site()` / `last_selected_site()`, the same
+reload-survival trick the live-data cache already used. Run `pytest -q` before and after
+touching any of it — `tests/test_phase8_ux.py` drives the whole journey through Streamlit's
+AppTest, and `tests/test_phase18_page_scope_and_site_persistence.py` covers these two fixes.
 
 ## Still needed from the user (pluggable, safe to defer)
 - Real sample HTML from a live ToolsVenue tool page and a live ToolsHall blog
