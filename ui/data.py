@@ -32,6 +32,7 @@ from core import config, ga4, gsc, seed
 from core.classifier import recommend
 
 _CACHE_DIR = config.ROOT / "data" / "live_cache"
+_UI_STATE_PATH = config.ROOT / "data" / "ui_state.json"
 
 
 def _coverage_key(site: config.Site) -> str:
@@ -93,6 +94,36 @@ def _persist_to_disk(site: config.Site, refreshed_at: str) -> None:
         "ga4": st.session_state.get(_ga4_key(site)),
     }
     _cache_path(site).write_text(json.dumps(payload), encoding="utf-8")
+
+
+def save_selected_site(site_key: str) -> None:
+    """
+    Persist which site the sidebar has selected (Phase 18). Same reason as
+    the live-data cache above: a browser tab reload starts a brand new
+    Streamlit session with nothing in `session_state`, so without this the
+    sidebar silently reset to the first site in the list on every reload
+    instead of restoring the one the user actually had picked.
+    """
+    if not site_key:
+        return
+    try:
+        current = json.loads(_UI_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        current = {}
+    if current.get("selected_site") == site_key:
+        return
+    _UI_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    current["selected_site"] = site_key
+    _UI_STATE_PATH.write_text(json.dumps(current), encoding="utf-8")
+
+
+def last_selected_site() -> str:
+    """The last site saved by `save_selected_site()` — "" if none yet."""
+    try:
+        payload = json.loads(_UI_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return payload.get("selected_site", "")
 
 
 def last_refreshed(site: config.Site) -> str:

@@ -41,11 +41,25 @@ st.sidebar.caption(views.PAGES[page][2])
 
 st.sidebar.divider()
 
+# Persisted the same way `nav` is: a browser tab reload starts a brand new
+# session with nothing in session_state, so without this the site silently
+# reset to the first one in the list on every reload. `save_selected_site`
+# writes to disk (see ui/data.py) the same way live data survives a reload.
+site_keys = [s.key for s in config.SITES]
+_default_site_key = d.last_selected_site()
+if _default_site_key not in site_keys:
+    _default_site_key = site_keys[0]
+st.session_state.setdefault("site_key", _default_site_key)
+if st.session_state["site_key"] not in site_keys:
+    st.session_state["site_key"] = _default_site_key
+
 site_key = st.sidebar.selectbox(
-    "Site", [s.key for s in config.SITES],
+    "Site", site_keys,
     format_func=lambda k: config.SITES_BY_KEY[k].label,
+    key="site_key",
     help="Every page below shows this site.",
 )
+d.save_selected_site(site_key)
 site = config.SITES_BY_KEY[site_key]
 
 today = dt.date.today()
